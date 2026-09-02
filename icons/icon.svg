@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#1a5c3a"/>
+  <!-- route line from kitchen to three stops -->
+  <path d="M136 372 C 136 300, 220 316, 236 256 C 252 196, 176 190, 196 140"
+        fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round"
+        stroke-dasharray="4 34" opacity=".55"/>
+  <circle cx="136" cy="372" r="34" fill="#c8860a"/>
+  <circle cx="236" cy="256" r="22" fill="#ffffff"/>
+  <circle cx="196" cy="140" r="22" fill="#ffffff"/>
+  <!-- destination pin -->
+  <path d="M356 112 c-40 0-72 32-72 72 0 54 72 128 72 128 s72-74 72-128 c0-40-32-72-72-72 z"
+        fill="#ffffff"/>
+  <circle cx="356" cy="184" r="28" fill="#1a5c3a"/>
+</svg>

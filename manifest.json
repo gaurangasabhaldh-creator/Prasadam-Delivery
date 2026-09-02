@@ -1,0 +1,20 @@
+{
+  "name": "SevaRoute — Prasadam Delivery",
+  "short_name": "SevaRoute",
+  "description": "Route-optimised prasadam delivery for a trust kitchen",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f8f7",
+  "theme_color": "#1a5c3a",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "My Route", "url": "./index.html#myroute", "description": "Today's delivery route" },
+    { "name": "Route Board", "url": "./index.html#routes", "description": "All routes for today" }
+  ]
+}

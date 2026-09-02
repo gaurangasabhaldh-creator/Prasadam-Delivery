@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Edge case / bug hunt</title>
+<link rel="stylesheet" href="../css/style.css"></head><body>
+<pre id="out" style="white-space:pre-wrap;font-size:12px;padding:1rem"></pre>
+<script>
+var __lines = [];
+function log(s){ __lines.push(String(s)); }
+function done(){ document.getElementById('out').textContent = __lines.join('\n'); document.title='DONE'; }
+window.onerror = function(m,u,l){ log('ERROR: '+m+' @line '+l); done(); };
+</script>
+<script src="./firebase-stub.js"></script>
+<script src="../js/firebase-config.js"></script>
+<script src="../js/config.js"></script>
+<script src="../js/rotation.js"></script>
+<script src="../js/solver.js"></script>
+<script src="../js/geo.js"></script>
+<script>
+let pass = 0, fail = 0; const failures = [];
+function check(name, cond, detail) {
+  if (cond) { pass++; log('  ok   ' + name); }
+  else { fail++; failures.push(name + (detail ? ' -> ' + detail : '')); log('  FAIL ' + name + (detail ? ' -> ' + detail : '')); }
+}
+function noThrow(name, fn) {
+  try { fn(); pass++; log('  ok   ' + name); }
+  catch (e) { fail++; failures.push(name + ' -> threw: ' + e.message); log('  FAIL ' + name + ' -> threw: ' + e.message); }
+}
+
+function dev(id, areaId, extra = {}) {
+  return { id, name: 'D' + id, areaId, status: 'active', isActive: true,
+           servedInRound: null, timesServed: 0, carriedForwardFrom: null, ...extra };
+}
+
+async function main() {
+  log('====== 1: malformed / missing data must not crash ======');
+  noThrow('buildSequence(null)',            () => buildSequence(null));
+  noThrow('buildSequence(undefined)',       () => buildSequence(undefined));
+  noThrow('buildSequence with null entries',() => buildSequence([{ id:'a', name:'A', isActive:true }]));
+  noThrow('buildChecklist(null, null)',     () => Rotation.buildChecklist(null, null));
+  noThrow('buildChecklist(devotees, null)', () => Rotation.buildChecklist([dev('1','A')], null));
+  noThrow('buildChecklist with null areaIds',
+          () => Rotation.buildChecklist([dev('1','A')], { roundNumber:1, batchKey:'x', areaIds:[] }));
+  noThrow('describeSequence with no state', () => Rotation.describeSequence([{id:'a',name:'A',isActive:true}], [], null));
+  noThrow('coverageOutlook(null devotee)',  () => Rotation.coverageOutlook(null, [], null));
+  noThrow('isActiveDevotee(undefined)',     () => isActiveDevotee(undefined));
+  noThrow('hasCoords(null)',                () => hasCoords(null));
+  noThrow('centroid([])',                   () => centroid([]));
+  noThrow('haversineKm(null,null)',         () => haversineKm(null, null));
+  noThrow('normalizePhone(undefined)',      () => normalizePhone(undefined));
+  noThrow('escapeHtml(null)',               () => escapeHtml(null));
+  noThrow('fmtAgo(garbage)',                () => fmtAgo('not-a-date'));
+  noThrow('fmtDateShort(garbage)',          () => fmtDateShort('nonsense'));
+  noThrow('fmtDateTime(undefined)',         () => fmtDateTime(undefined));
+
+  log('');
+  log('====== 2: areas with no sequencePosition ======');
+  // An area imported without a position must not vanish or crash the order.
+  const noPos = buildSequence([
+    { id:'a', name:'A', isActive:true },                        // no sequencePosition
+    { id:'b', name:'B', sequencePosition:1, isActive:true }
+  ]);
+  check('area without a position still enters the sequence', noPos.length === 2, String(noPos.length));
+  check('positioned area sorts ahead of unpositioned', noPos[0].label === 'B', noPos[0].label);
+
+  log('');
+  log('====== 3: duplicate sequence positions ======');
+  const dupes = buildSequence([
+    { id:'a', name:'Alpha', sequencePosition:1, isActive:true },
+    { id:'b', name:'Bravo', sequencePosition:1, isActive:true }
+  ]);
+  check('duplicate positions do not collapse or drop an area', dupes.length === 2);
+  check('duplicate positions break the tie deterministically by name',
+        dupes[0].label === 'Alpha', dupes.map(b=>b.label).join(','));
+  // Determinism matters: a different input order must give the same cycle.
+  const dupes2 = buildSequence([
+    { id:'b', name:'Bravo', sequencePosition:1, isActive:true },
+    { id:'a', name:'Alpha', sequencePosition:1, isActive:true }
+  ]);
+  check('sequence is stable regardless of input order',
+        dupes.map(b=>b.key).join(',') === dupes2.map(b=>b.key).join(','));
+
+  log('');
+  log('====== 4: a batch group spanning non-adjacent positions ======');
+  const split = buildSequence([
+    { id:'a', name:'A', sequencePosition:1, batchGroup:null, isActive:true },
+    { id:'c', name:'C', sequencePosition:2, batchGroup:'CD', isActive:true },
+    { id:'b', name:'B', sequencePosition:3, batchGroup:null, isActive:true },
+    { id:'d', name:'D', sequencePosition:9, batchGroup:'CD', isActive:true }
+  ]);
+  check('a group split across the list still forms ONE batch', split.length === 3, String(split.length));
+  const cd = split.find(b => b.areaIds.length === 2);
+  check('the split group keeps both areas', !!cd && cd.areaIds.includes('c') && cd.areaIds.includes('d'));
+  check('the group sits at its EARLIEST member position',
+        split[1] === cd, split.map(b=>b.label).join(' -> '));
+
+  log('');
+  log('====== 5: single-area sequence wraps onto itself ======');
+  const one = buildSequence([{ id:'a', name:'Only', sequencePosition:1, isActive:true }]);
+  const n1 = Rotation._nextState({ roundNumber:1, batchKey:one[0].key, areaIds:['a'], label:'Only' }, one);
+  check('a one-area sequence reopens itself', n1.state.batchKey === one[0].key);
+  check('and still increments the round', n1.state.roundNumber === 2, String(n1.state.roundNumber));
+  check('and is flagged as a wrap', n1.wrapped === true);
+
+  log('');
+  log('====== 6: completion vs paused / deleted devotees ======');
+  const st = { roundNumber: 1, batchKey: 'a:A', areaIds: ['A'] };
+  check('a soft-deleted devotee never blocks completion',
+        Rotation.buildChecklist([dev('1','A',{isActive:false})], st).complete === true);
+  check('a soft-deleted devotee is not listed as paused either',
+        Rotation.buildChecklist([dev('1','A',{isActive:false})], st).paused.length === 0);
+  check('mixed paused + deleted still completes',
+        Rotation.buildChecklist([dev('1','A',{status:'paused'}), dev('2','A',{isActive:false})], st).complete === true);
+  check('one active among them blocks completion',
+        Rotation.buildChecklist([dev('1','A',{status:'paused'}), dev('2','A')], st).complete === false);
+
+  log('');
+  log('====== 7: devotee with a null / unknown area ======');
+  check('devotee with null area is never on any checklist',
+        Rotation.buildChecklist([dev('1', null)], st).total === 0);
+  check('devotee in a deleted area is never on the checklist',
+        Rotation.buildChecklist([dev('1', 'GHOST')], st).total === 0);
+  const outlook = Rotation.coverageOutlook(dev('1', null), [], { roundNumber:1, batchKey:'x', areaIds:[] });
+  check('...and the directory warns they will not be covered',
+        outlook.tone === 'red', outlook.text);
+
+  log('');
+  log('====== 8: round-number edge values ======');
+  check('servedInRound 0 is not confused with "never"',
+        isServedInRound({ servedInRound: 0 }, 0) === true);
+  check('null servedInRound never matches round 0',
+        isServedInRound({ servedInRound: null }, 0) === false);
+  const big = Rotation._nextState({ roundNumber: 999, batchKey:'a:x', areaIds:['x'], label:'X' },
+                                  [{ key:'a:x', areaIds:['x'], label:'X' }]);
+  check('round numbers keep incrementing at high values', big.state.roundNumber === 1000);
+
+  log('');
+  log('====== 9: solver edge cases ======');
+  const r0 = await Solver.orderChecklist([], {});
+  check('ordering an empty list is safe', r0.ordered.length === 0 && r0.totalKm === 0);
+  const r1 = await Solver.orderChecklist([dev('1','A',{lat:30.9,lng:75.8})], {});
+  check('ordering a single devotee is safe', r1.ordered.length === 1 && r1.ordered[0].sequence === 1);
+  const rNone = await Solver.orderChecklist([dev('1','A'), dev('2','A')], {});
+  check('all-unpinned list returns them as unmappable, not lost',
+        rNone.unmappable.length === 2 && rNone.ordered.length === 0);
+  const rDup = await Solver.orderChecklist(
+    [dev('1','A',{lat:30.9,lng:75.8}), dev('2','A',{lat:30.9,lng:75.8})], {});
+  check('two devotees at identical coordinates do not break ordering',
+        rDup.ordered.length === 2 && Number.isFinite(rDup.totalKm), String(rDup.totalKm));
+  check('suggestAreaSequence with no pinned devotees returns every area',
+        Solver.suggestAreaSequence([{id:'a',name:'A'},{id:'b',name:'B'}], [], null).length === 2);
+  check('suggestAreaSequence with no areas is safe',
+        Solver.suggestAreaSequence([], [], null).length === 0);
+
+  log('');
+  log('====== 10: geo matrix edge cases ======');
+  const m1 = await Geo.buildMatrix([{lat:30.9,lng:75.8}], { speedKmph: 20 });
+  check('1-point matrix is well formed', m1.dist.length === 1 && m1.dist[0][0] === 0);
+  const m2 = await Geo.buildMatrix([{lat:30.9,lng:75.8},{lat:30.91,lng:75.81}], { speedKmph: 20 });
+  check('matrix is symmetric', Math.abs(m2.dist[0][1] - m2.dist[1][0]) < 1e-9);
+  check('diagonal is zero', m2.dist[0][0] === 0 && m2.dist[1][1] === 0);
+  check('travel time is positive between distinct points', m2.time[0][1] > 0);
+  check('unknown provider falls back rather than throwing',
+        (await Geo.buildMatrix([{lat:1,lng:1},{lat:2,lng:2}], { provider: 'nonsense' })).dist.length === 2);
+
+  log('');
+  log('====== 11: nav links ======');
+  check('navUrlFor with neither pin nor address returns null',
+        navUrlFor({ lat:null, lng:null, addressText:'' }, '', '') === null);
+  check('navUrlFor with only an area name still returns null (no real address)',
+        navUrlFor({ lat:null, lng:null, addressText:'' }, 'Some Area', 'City') !== null);
+  check('fullAddressOf drops empty parts', fullAddressOf({addressText:'H-1'},'','') === 'H-1, India');
+  check('fullAddressOf returns empty when there is nothing at all',
+        fullAddressOf({addressText:''},'','') === '');
+  check('a devotee name with quotes cannot break out of HTML',
+        escapeHtml('a"b<script>').indexOf('<') === -1);
+
+  log('');
+  log('====== 12: names with apostrophes cannot break handlers ======');
+  // Regression: an area called "Devi's Colony" was interpolated straight into
+  // an inline onclick. escapeHtml turns ' into &#39;, which the browser decodes
+  // back to a bare ' BEFORE the JS parser sees it — producing a SyntaxError
+  // and a dead button. Handlers must never carry user text.
+  const risky = [
+    { id: 'x1', name: "Devi's Colony", sequencePosition: 1, batchGroup: null, isActive: true },
+    { id: 'x2', name: 'Gali "No 4"',   sequencePosition: 2, batchGroup: "O'Brien", isActive: true }
+  ];
+  noThrow('sequence builds from names containing quotes', () => buildSequence(risky));
+  const rseq = buildSequence(risky);
+  check('apostrophe area survives into the sequence', rseq[0].label === "Devi's Colony", rseq[0].label);
+  check('a batch group with an apostrophe still keys correctly',
+        rseq[1].key.indexOf("O'Brien") > -1, rseq[1].key);
+
+  // Render the real dashboard markup and confirm no handler carries the text.
+  const el = document.createElement('div');
+  el.id = 'tab-rotation';
+  document.body.appendChild(el);
+  AppState.areas = risky;
+  AppState.userRole = 'superAdmin';
+  AppState.user = { uid: 'u' };
+  const handlers = [...('' + document.body.innerHTML).matchAll(/onclick="([^"]*)"/g)].map(m => m[1]);
+  check('no rendered handler embeds a raw apostrophe from data',
+        handlers.every(h => !/jumpToBatch\('/.test(h)), handlers.join(' | '));
+  el.remove();
+
+  log('');
+  log('====== 13: no query runs inside a Firestore transaction ======');
+  // Regression: the client SDK cannot run a query inside a transaction, so
+  // counting pending devotees there gave zero isolation and re-ran on every
+  // retry. Advancing is now a compare-and-set on the state document.
+  const rotSrc = await (await fetch('../js/rotation.js')).text();
+  const txBodies = [...rotSrc.matchAll(/runTransaction\(async \(tx\) => \{([\s\S]*?)\n    \}\);/g)].map(m => m[1]);
+  check('rotation.js has transaction bodies to inspect', txBodies.length >= 1, String(txBodies.length));
+  check('no .where() query appears inside any transaction',
+        txBodies.every(b => !/\.where\(/.test(b)));
+  check('no non-transactional .get() appears inside any transaction',
+        txBodies.every(b => !/(?<!tx)\.get\(\)/.test(b)));
+  check('advanceIfComplete exists and is the advance path',
+        typeof Rotation.advanceIfComplete === 'function');
+  check('advance is guarded by a compare-and-set on batchKey and round',
+        /live\.batchKey !== state\.batchKey/.test(rotSrc) &&
+        /live\.roundNumber !== state\.roundNumber/.test(rotSrc));
+  check('the empty-batch chain is capped so it cannot spin forever',
+        /steps > \d+/.test(rotSrc));
+
+  log('');
+  log('====== 14: Google Maps link parsing ======');
+
+  // The exact link the coordinator pasted: a shared "place" URL. It has NO
+  // coordinates anywhere, but the full address sits in the /place/ segment.
+  const REAL = 'https://www.google.com/maps/place/S.+D+Gupta+Memorial+School,+shop+no.+11,+street+name,+33+Feet+Rd,+Giaspura,+Ludhiana,+Punjab+141003/data=!4m2!3m1!1s0x391a82b17361b45f:0x30f76adf4fe4ec33!17m2!4m1!1e3!18m1!1e1?utm_source=mstt_1&entry=gps';
+  const real = parseMapsLink(REAL);
+  check('real shared link is accepted', !!real);
+  check('real link has no coordinates (correctly reported)', real.lat === null, String(real.lat));
+  check('real link yields the full address', real.placeText.indexOf('Giaspura') > -1, real.placeText);
+  check('real link is classified as navigable-by-place', real.kind === 'place', real.kind);
+  const realNav = navUrlFor({ mapsUrl: REAL }, '', '');
+  check('real link produces a turn-by-turn destination',
+        realNav.indexOf('dir/?api=1') > -1 && realNav.indexOf('dir_action=navigate') > -1, realNav.slice(0, 70));
+  check('the destination is the address, not the raw URL',
+        decodeURIComponent(realNav).indexOf('Gupta Memorial School') > -1);
+
+  // Coordinate-bearing shapes must be recognised so distance ordering works.
+  const shapes = {
+    'place with @lat,lng':  'https://www.google.com/maps/place/Foo/@30.8843,75.8302,17z/data=!3m1',
+    'data blob !3d!4d':     'https://www.google.com/maps/place/Foo/data=!3m1!4b1!4m5!3d30.8843!4d75.8302',
+    'legacy ?q=':           'https://www.google.com/maps?q=30.8843,75.8302',
+    'api=1 &query=':        'https://www.google.com/maps/search/?api=1&query=30.8843,75.8302',
+    'directions dest':      'https://www.google.com/maps/dir/?api=1&destination=30.8843,75.8302',
+    'll param':             'https://maps.google.com/?ll=30.8843,75.8302&z=17'
+  };
+  for (const [label, url] of Object.entries(shapes)) {
+    const p = parseMapsLink(url);
+    check(`coords extracted from ${label}`,
+          !!p && Math.abs(p.lat - 30.8843) < 1e-6 && Math.abs(p.lng - 75.8302) < 1e-6,
+          p ? `${p.lat},${p.lng}` : 'null');
+  }
+
+  check('bare coordinates pasted directly are accepted',
+        (() => { const p = parseMapsLink('30.8843, 75.8302'); return p && p.lat === 30.8843; })());
+  check('a short link is stored and opened as-is',
+        (() => { const p = parseMapsLink('https://maps.app.goo.gl/abc123');
+                 return p && p.lat === null && p.kind === 'link'; })());
+  check('short link still yields a working Navigate target',
+        navUrlFor({ mapsUrl: 'https://maps.app.goo.gl/abc123' }, '', '') === 'https://maps.app.goo.gl/abc123');
+
+  check('nonsense text is rejected, not stored as a link', parseMapsLink('hello there') === null);
+  check('empty input is rejected', parseMapsLink('') === null && parseMapsLink(null) === null);
+  check('out-of-range coordinates are refused',
+        (() => { const p = parseMapsLink('https://www.google.com/maps?q=999.9,888.8');
+                 return p && p.lat === null; })());
+  check('a plus-code place segment is not shown as an address',
+        (() => { const p = parseMapsLink('https://www.google.com/maps/place/30.88,75.83/data=!4m2');
+                 return p && p.placeText === ''; })());
+
+  log('');
+  log('====== 15: navigation priority order ======');
+  const CO = { lat: 30.9, lng: 75.85, mapsUrl: REAL, addressText: 'H-1' };
+  check('an exact pin beats a saved link',
+        navUrlFor(CO, 'Area', 'City').indexOf('30.9') > -1);
+  check('a saved link beats the typed address',
+        navUrlFor({ mapsUrl: REAL, addressText: 'H-1' }, 'Area', 'City')
+          .indexOf('Gupta') > -1 || decodeURIComponent(navUrlFor({ mapsUrl: REAL, addressText: 'H-1' }, 'Area', 'City')).indexOf('Gupta') > -1);
+  check('the typed address is still the last resort',
+        decodeURIComponent(navUrlFor({ addressText: 'H-1 Gali 4' }, 'Field Ganj', 'Ludhiana')).indexOf('H-1 Gali 4') > -1);
+  check('nothing at all still yields no button',
+        navUrlFor({ addressText: '' }, '', '') === null);
+  check('a link that carries coords is detected for distance ordering',
+        mapsLinkHasCoords('https://www.google.com/maps/place/X/@30.88,75.83,17z') === true);
+  check('the shared-place link is correctly reported as NOT orderable',
+        mapsLinkHasCoords(REAL) === false);
+
+  log('');
+  log('====== 16: role ranking ======');
+  AppState.userRole = 'sevadar';
+  check('sevadar is not admin', hasRole('sevadar') && !hasRole('admin'));
+  AppState.userRole = 'admin';
+  check('admin is not superAdmin', hasRole('admin') && !hasRole('superAdmin'));
+  AppState.userRole = 'driver';
+  check('legacy driver still ranks as sevadar', hasRole('sevadar') && !hasRole('admin'));
+  AppState.userRole = 'dispatcher';
+  check('legacy dispatcher still ranks as admin', hasRole('admin') && !hasRole('superAdmin'));
+  AppState.userRole = 'nonsense';
+  check('an unknown role gets no privileges at all',
+        !hasRole('sevadar') && !hasRole('admin') && !hasRole('superAdmin'));
+  AppState.userRole = null;
+  check('a null role gets no privileges', !hasRole('sevadar'));
+
+  log('');
+  log('============================================================');
+  log('  PASS ' + pass + '   FAIL ' + fail);
+  if (failures.length) { log(''); log('  FAILURES:'); failures.forEach(f => log('   x ' + f)); }
+  log('============================================================');
+  done();
+}
+
+main().catch(e => { log('HARNESS ERROR: ' + (e && e.stack || e)); done(); });
+</script>
+</body></html>

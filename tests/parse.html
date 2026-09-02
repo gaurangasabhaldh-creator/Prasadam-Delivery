@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Parse check</title></head><body>
+<pre id="out" style="white-space:pre-wrap;font-size:12px;padding:1rem"></pre>
+<script>
+const FILES = ['firebase-config','config','db','geo','rotation','solver','excel',
+               'ui-core','ui-rotation','ui-checklist','ui-devotees','ui-config','ui-reports'];
+const lines = [];
+const log = s => lines.push(String(s));
+
+(async () => {
+  let bad = 0;
+  log('Parsing every app module with the real JS engine');
+  log('='.repeat(56));
+  for (const f of FILES) {
+    let src;
+    try {
+      src = await (await fetch(`../js/${f}.js`)).text();
+    } catch (e) {
+      log(`  UNREADABLE  ${f}.js  ${e.message}`); bad++; continue;
+    }
+    try {
+      // Forces a full parse without executing anything.
+      new Function(src);
+      log(`  ok   ${f}.js  (${src.split('\n').length} lines)`);
+    } catch (e) {
+      log(`  SYNTAX ERROR  ${f}.js  ->  ${e.message}`); bad++;
+    }
+  }
+  log('='.repeat(56));
+  log(bad === 0 ? `  ALL ${FILES.length} MODULES PARSE CLEANLY` : `  ${bad} FILE(S) FAILED TO PARSE`);
+  document.getElementById('out').textContent = lines.join('\n');
+  document.title = 'DONE';
+})();
+</script>
+</body></html>

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>App smoke tests</title>
+<!-- Must mirror index.html's stylesheets or rendered output won't match the real app. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Nunito:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/style.css">
+</head><body>
+
+<div id="setup-screen" class="fullscreen hidden"></div>
+<div id="auth-screen" class="fullscreen hidden">
+  <div id="auth-error" class="hidden"></div>
+  <input id="auth-email">
+  <div class="password-wrap">
+    <input type="password" id="auth-password">
+    <button type="button" class="password-toggle" id="auth-password-toggle"
+            aria-label="Show password" aria-pressed="false" title="Show password"><i class="fa-solid fa-eye"></i></button>
+  </div>
+  <button id="auth-submit"><span>Sign In</span></button>
+  <button id="auth-toggle"></button>
+</div>
+
+<div id="app">
+  <div id="topbar-sub"></div><span id="user-role-badge"></span>
+  <button id="btn-signout"></button>
+  <nav class="tabs" id="tabs">
+    <button class="tab" data-tab="rotation"  data-min-role="admin"></button>
+    <button class="tab" data-tab="checklist" data-min-role="sevadar"></button>
+    <button class="tab" data-tab="devotees"  data-min-role="admin"></button>
+    <button class="tab" data-tab="config"    data-min-role="admin"></button>
+    <button class="tab" data-tab="reports"   data-min-role="admin"></button>
+  </nav>
+  <main>
+    <section id="tab-rotation"  class="tabpanel hidden"></section>
+    <section id="tab-checklist" class="tabpanel hidden"></section>
+    <section id="tab-devotees"  class="tabpanel hidden"></section>
+    <section id="tab-config"    class="tabpanel hidden"></section>
+    <section id="tab-reports"   class="tabpanel hidden"></section>
+  </main>
+</div>
+
+<div id="devotee-modal" class="modal hidden"><div class="modal-box"></div></div>
+<div id="area-modal" class="modal hidden"><div class="modal-box"></div></div>
+<div id="pin-modal" class="modal hidden"><div class="modal-box wide"></div></div>
+<div id="import-modal" class="modal hidden"><div class="modal-box wide"></div></div>
+<div id="stop-modal" class="modal hidden"><div class="modal-box"></div></div>
+<div id="confirm-modal" class="modal hidden"><div class="modal-box narrow"></div></div>
+<div id="toast-host" class="toast-host"></div>
+<div id="busy" class="busy hidden"><div class="spinner"></div><div id="busy-text"></div></div>
+
+<pre id="out" style="white-space:pre-wrap;font-size:12px"></pre>
+
+<script>
+var __lines = [], __errors = [];
+function log(s){ __lines.push(String(s)); }
+function done(){ document.getElementById('out').textContent = __lines.join('\n'); document.title='DONE'; }
+window.onerror = function(m,u,l){ __errors.push(m + ' @' + (u||'').split('/').pop() + ':' + l); return false; };
+window.addEventListener('unhandledrejection', e => __errors.push('UNHANDLED: ' + (e.reason && e.reason.message || e.reason)));
+</script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../js/xlsx-js-style.bundle.js"></script>
+<script src="./firebase-stub.js"></script>
+<script src="../js/firebase-config.js"></script>
+<script src="../js/config.js"></script>
+<script src="../js/db.js"></script>
+<script src="../js/geo.js"></script>
+<script src="../js/rotation.js"></script>
+<script src="../js/solver.js"></script>
+<script src="../js/excel.js"></script>
+<script src="../js/ui-core.js"></script>
+<script src="../js/ui-rotation.js"></script>
+<script src="../js/ui-checklist.js"></script>
+<script src="../js/ui-devotees.js"></script>
+<script src="../js/ui-config.js"></script>
+<script src="../js/ui-reports.js"></script>
+
+<script>
+let pass = 0, fail = 0; const failures = [];
+function check(name, cond, detail) {
+  if (cond) { pass++; log('  ok   ' + name); }
+  else { fail++; failures.push(name + (detail ? ' -> ' + detail : '')); log('  FAIL ' + name + (detail ? ' -> ' + detail : '')); }
+}
+
+// ── FIXTURES: the PRD's own A -> B -> (C+D) sequence ──
+let AREAS = [
+  { id: 'A', name: 'Samrala Chowk', city: 'Ludhiana', sequencePosition: 1, batchGroup: null, isActive: true },
+  { id: 'B', name: 'Field Ganj',    city: 'Ludhiana', sequencePosition: 2, batchGroup: null, isActive: true },
+  { id: 'C', name: 'Dugri',         city: 'Ludhiana', sequencePosition: 3, batchGroup: 'CD', isActive: true },
+  { id: 'D', name: 'Model Town',    city: 'Ludhiana', sequencePosition: 4, batchGroup: 'CD', isActive: true }
+];
+
+function mk(id, areaId, extra = {}) {
+  return { id, name: 'Devotee ' + id, phone: '90000000' + id, addressText: 'H-' + id,
+           areaId, lat: 30.9 + Number(id) / 1000, lng: 75.85 + Number(id) / 1000,
+           geocodeStatus: 'ok', status: 'active', isActive: true,
+           servedInRound: null, lastServedAt: null, timesServed: 0,
+           carriedForwardFrom: null, notes: '', ...extra };
+}
+
+let DEVOTEES = [
+  mk('1', 'A'), mk('2', 'A'), mk('3', 'A', { status: 'paused' }),
+  mk('4', 'B'), mk('5', 'C'), mk('6', 'D'),
+  mk('7', 'A', { lat: null, lng: null, geocodeStatus: 'pending' }),
+  mk('8', 'B', { lastServedAt: new Date(Date.now() - 200 * 86400000).toISOString(), timesServed: 3 })
+];
+
+let STATE = null;
+let ROUNDS = [];
+let COVERAGE = [];
+const SETTINGS = { ...DEFAULT_SETTINGS, startPoint: { name: 'Temple', lat: 30.9010, lng: 75.8573 } };
+const USERS = [{ id: 'u1', email: 'admin@temple.org', role: 'superAdmin' },
+               { id: 'u2', email: 'sevadar@temple.org', role: 'sevadar' }];
+const writes = [];
+
+// db.js declares `const DB` at top level — a global LEXICAL binding that
+// `window.DB = ...` cannot shadow. Overwrite the methods on the object.
+Object.assign(DB, {
+  getSettings: async () => SETTINGS,
+  getAreas: async () => AREAS,
+  getDevotees: async () => DEVOTEES,
+  getDevotee: async (id) => DEVOTEES.find(d => d.id === id),
+  getUsers: async () => USERS,
+  getRounds: async () => ROUNDS,
+  getRecentCoverage: async () => COVERAGE,
+  getCoverageForDevotee: async (id) => COVERAGE.filter(c => c.devoteeId === id),
+  saveArea: async () => { writes.push('saveArea'); return 'NEW'; },
+  saveSequence: async (ids) => { writes.push('saveSequence:' + ids.join(',')); },
+  saveDevotee: async () => { writes.push('saveDevotee'); return 'NEW'; },
+  saveSettings: async () => { writes.push('saveSettings'); },
+  setDevoteeStatus: async () => { writes.push('setDevoteeStatus'); },
+  deleteDevotee: async () => { writes.push('deleteDevotee'); },
+  deleteArea: async () => { writes.push('deleteArea'); },
+  mergeAreas: async () => { writes.push('mergeAreas'); return 2; },
+  setUserRole: async () => { writes.push('setUserRole'); },
+  saveGeocode: async () => { writes.push('saveGeocode'); },
+  audit: async () => {}
+});
+
+// Rotation's writes go through Firestore transactions, which the stub
+// refuses on purpose. Simulate the state machine over the fixtures so the
+// UI is driven by the same logic the real engine uses (_nextState and
+// buildChecklist are the real, untouched implementations).
+Object.assign(Rotation, {
+  getState: async () => STATE,
+  start: async (areas) => {
+    const seq = buildSequence(areas);
+    STATE = { roundNumber: 1, batchKey: seq[0].key, areaIds: seq[0].areaIds,
+              label: seq[0].label, openedAtClient: new Date().toISOString() };
+    writes.push('rotation.start');
+    return STATE;
+  },
+  markServed: async (id) => {
+    const d = DEVOTEES.find(x => x.id === id);
+    if (!STATE.areaIds.includes(d.areaId)) throw new Error(d.name + ' is not in the area that is currently open');
+    if (isServedInRound(d, STATE.roundNumber)) return null;
+    d.servedInRound = STATE.roundNumber;
+    d.lastServedAt = new Date().toISOString();
+    d.timesServed = (d.timesServed || 0) + 1;
+    d.carriedForwardFrom = null;
+    COVERAGE.unshift({ devoteeId: id, devoteeName: d.name, areaId: d.areaId,
+                       roundNumber: STATE.roundNumber, servedAtClient: new Date().toISOString(),
+                       servedByName: 'Tester' });
+    writes.push('markServed:' + id);
+    return Rotation.advanceIfComplete();
+  },
+  undoServed: async (id) => {
+    const d = DEVOTEES.find(x => x.id === id);
+    d.servedInRound = null; d.timesServed = Math.max(0, d.timesServed - 1);
+    writes.push('undo:' + id);
+  },
+  forceClose: async (reason) => {
+    const cl = Rotation.buildChecklist(DEVOTEES, STATE);
+    cl.pending.forEach(d => { d.carriedForwardFrom = STATE.roundNumber; });
+    ROUNDS.unshift({ id: STATE.roundNumber + '_' + STATE.batchKey, roundNumber: STATE.roundNumber,
+                     batchKey: STATE.batchKey, areaIds: STATE.areaIds, label: STATE.label,
+                     openedAtClient: STATE.openedAtClient, closedAtClient: new Date().toISOString(),
+                     forceClosed: true, reason, missedCount: cl.pending.length,
+                     missedDevoteeNames: cl.pending.map(d => d.name) });
+    const adv = Rotation._nextState(STATE, buildSequence(AREAS));
+    STATE = { ...adv.state, openedAtClient: new Date().toISOString() };
+    writes.push('forceClose');
+    return { advanced: adv, missed: cl.pending };
+  },
+  advanceIfComplete: async () => {
+    // Mirrors the real compare-and-set: only advances a genuinely finished
+    // batch, and is safe to call at any time.
+    if (!STATE) return null;
+    const cl = Rotation.buildChecklist(DEVOTEES, STATE);
+    if (!cl.complete) return null;
+    const adv = Rotation._nextState(STATE, buildSequence(AREAS));
+    ROUNDS.unshift({ id: STATE.roundNumber + '_' + STATE.batchKey, roundNumber: STATE.roundNumber,
+                     batchKey: STATE.batchKey, areaIds: STATE.areaIds, label: STATE.label,
+                     openedAtClient: STATE.openedAtClient, closedAtClient: new Date().toISOString(),
+                     forceClosed: false, missedCount: 0 });
+    STATE = { ...adv.state, openedAtClient: new Date().toISOString() };
+    writes.push('advance');
+    return adv;
+  },
+  openBatch: async (key) => {
+    const b = buildSequence(AREAS).find(x => x.key === key);
+    STATE = { ...STATE, batchKey: b.key, areaIds: b.areaIds, label: b.label,
+              openedAtClient: new Date().toISOString() };
+    writes.push('openBatch:' + key);
+    return STATE;
+  }
+});
+
+async function main() {
+  document.getElementById('setup-screen').classList.add('hidden');
+  document.getElementById('auth-screen').classList.add('hidden');
+
+  AppState.user = { uid: 'u1' };
+  AppState.userRole = 'superAdmin';
+  AppState.userName = 'Admin';
+
+  log('====== A: modules load, globals present ======');
+  ['DB','Geo','Rotation','Solver','showToast','openModal','confirmDialog',
+   'loadRotation','loadChecklist','loadDevotees','loadConfig','loadReports',
+   'startRotation','forceCloseBatch','markServed','undoServe','editDevotee',
+   'editArea','exportDevotees','exportCoverage','openImportModal'].forEach(g =>
+    check('global ' + g, typeof window[g] !== 'undefined'));
+  check('XLSX loaded', typeof XLSX !== 'undefined');
+  check('meal concepts are gone', typeof window.MEALS === 'undefined' &&
+        typeof window.MEAL_LABEL === 'undefined');
+
+  await loadBootstrap();
+  check('bootstrap loads areas', AppState.areas.length === 4);
+
+  log('');
+  log('====== B: before the rotation is started ======');
+  await loadRotation();
+  check('rotation tab offers to start', document.getElementById('tab-rotation').innerHTML.indexOf('Start the rotation') > -1);
+  check('start screen previews the sequence',
+        document.getElementById('tab-rotation').innerHTML.indexOf('Samrala Chowk') > -1);
+  await loadChecklist();
+  check('checklist explains nothing is open yet',
+        document.getElementById('tab-checklist').innerHTML.indexOf('not been started') > -1);
+
+  log('');
+  log('====== C: starting the rotation ======');
+  await window.startRotation();
+  check('rotation state created', !!STATE && STATE.roundNumber === 1);
+  check('first area of the sequence is opened', STATE.label === 'Samrala Chowk', STATE.label);
+  await loadRotation();
+  let html = document.getElementById('tab-rotation').innerHTML;
+  check('dashboard shows the open area', html.indexOf('Samrala Chowk') > -1);
+  check('dashboard shows the round number', html.indexOf('Round') > -1);
+  check('dashboard shows the whole cycle', html.indexOf('Dugri + Model Town') > -1);
+  check('dashboard names what is next', html.indexOf('Next up') > -1);
+
+  log('');
+  log('====== D: the checklist (PRD 7.4) ======');
+  await loadChecklist();
+  html = document.getElementById('tab-checklist').innerHTML;
+  check('checklist shows the open area name', html.indexOf('Samrala Chowk') > -1);
+  check('active devotees of that area are listed',
+        html.indexOf('Devotee 1') > -1 && html.indexOf('Devotee 2') > -1);
+  check('paused devotee is NOT on the tickable list',
+        html.indexOf('Devotee 3') === -1 || html.indexOf('not counted') > -1);
+  check('devotee from another area is absent', html.indexOf('Devotee 4') === -1);
+  check('un-pinned devotee still appears (pins are optional)', html.indexOf('Devotee 7') > -1);
+  check('each row has a tick control', html.indexOf('class="tick') > -1);
+  check('each row has a Navigate link',
+        html.indexOf('google.com/maps') > -1 || html.indexOf('google.navigation') > -1);
+  check('row shows when they last received', html.indexOf('Last received') > -1);
+
+  log('');
+  log('====== E: marking served, and auto-advance ======');
+  await window.markServed('1');
+  check('mark recorded', DEVOTEES.find(d => d.id === '1').servedInRound === 1);
+  check('times served incremented', DEVOTEES.find(d => d.id === '1').timesServed === 1);
+  check('still on Samrala Chowk — not everyone done', STATE.label === 'Samrala Chowk', STATE.label);
+
+  await loadChecklist();
+  check('progress is reflected', document.getElementById('tab-checklist').innerHTML.indexOf('1</b> of') > -1 ||
+        document.getElementById('tab-checklist').innerHTML.indexOf('Served (1)') > -1);
+
+  await window.markServed('2');
+  check('area still open with one left (the un-pinned devotee)', STATE.label === 'Samrala Chowk', STATE.label);
+
+  // Devotee 7 is the last active one in area A.
+  await window.markServed('7');
+  check('AUTO-ADVANCED once every active devotee was served',
+        STATE.label === 'Field Ganj', STATE.label);
+  check('round number unchanged mid-sequence', STATE.roundNumber === 1);
+  check('closing wrote a round-history record', ROUNDS.length === 1 && ROUNDS[0].forceClosed === false);
+  check('paused devotee never blocked completion',
+        DEVOTEES.find(d => d.id === '3').servedInRound === null);
+
+  log('');
+  log('====== F: serving somebody outside the open area is refused ======');
+  let refused = false;
+  try { await Rotation.markServed('5'); } catch (e) { refused = /not in the area/.test(e.message); }
+  check('cannot tick a devotee whose area is not open', refused);
+
+  log('');
+  log('====== G: force-close carries people forward (PRD 5.4) ======');
+  // Field Ganj is open with devotees 4 and 8 pending.
+  const { missed } = await Rotation.forceClose('testing');
+  check('force-close moved the rotation on', STATE.label === 'Dugri + Model Town', STATE.label);
+  check('missed devotees were recorded', missed.length === 2, String(missed.length));
+  check('missed devotees are flagged as carried forward',
+        DEVOTEES.find(d => d.id === '4').carriedForwardFrom === 1);
+  check('history records it as an early close',
+        ROUNDS[0].forceClosed === true && ROUNDS[0].missedCount === 2);
+
+  log('');
+  log('====== H: a batched pair opens as ONE checklist (PRD 5.1) ======');
+  await loadChecklist();
+  html = document.getElementById('tab-checklist').innerHTML;
+  check('both batched areas are open at once', STATE.areaIds.length === 2, STATE.areaIds.join(','));
+  check('devotees from BOTH areas are on one checklist',
+        html.indexOf('Devotee 5') > -1 && html.indexOf('Devotee 6') > -1);
+
+  log('');
+  log('====== I: completing the last batch wraps to round 2 ======');
+  await window.markServed('5');
+  check('batch not finished after one of two', STATE.roundNumber === 1);
+  await window.markServed('6');
+  check('WRAPPED to the start of the sequence', STATE.label === 'Samrala Chowk', STATE.label);
+  check('round number incremented to 2', STATE.roundNumber === 2, String(STATE.roundNumber));
+
+  await loadChecklist();
+  html = document.getElementById('tab-checklist').innerHTML;
+  check('round 2 shows everyone pending again with no data reset',
+        html.indexOf('Devotee 1') > -1 && html.indexOf('Served (') === -1);
+  check('devotee still carries their history into the new round',
+        DEVOTEES.find(d => d.id === '1').timesServed === 1);
+
+  log('');
+  log('====== J: carried-forward devotees are prioritised next time ======');
+  await Rotation.openBatch('a:B');
+  await loadChecklist();
+  const clHtml = document.getElementById('tab-checklist').innerHTML;
+  const posCarried = clHtml.indexOf('Carried forward');
+  check('carried-forward badge is shown', posCarried > -1);
+  const cl = Rotation.buildChecklist(DEVOTEES, STATE);
+  check('carried-forward devotee is first in the pending order',
+        !!cl.pending[0].carriedForwardFrom, cl.pending.map(d => d.id).join(','));
+
+  log('');
+  log('====== K: undo ======');
+  const beforeUndo = DEVOTEES.find(d => d.id === '4').timesServed;
+  await window.markServed('4');
+  check('served before undo', DEVOTEES.find(d => d.id === '4').servedInRound === 2);
+  check('marking increments the lifetime count',
+        DEVOTEES.find(d => d.id === '4').timesServed === beforeUndo + 1);
+  await Rotation.undoServed('4');
+  check('undo returns them to pending', DEVOTEES.find(d => d.id === '4').servedInRound === null);
+  // A mis-tap must leave no trace in the lifetime count, or "times served"
+  // stops being trustworthy as the no-one-missed signal.
+  check('undo rolls the lifetime count back to exactly where it was',
+        DEVOTEES.find(d => d.id === '4').timesServed === beforeUndo,
+        `${DEVOTEES.find(d => d.id === '4').timesServed} vs ${beforeUndo}`);
+  check('undo never drives the count negative',
+        DEVOTEES.find(d => d.id === '4').timesServed >= 0);
+
+  log('');
+  log('====== L: directory and its safety signals ======');
+  await loadDevotees();
+  html = document.getElementById('tab-devotees').innerHTML;
+  check('directory renders', html.length > 500);
+  check('shows last-received per devotee', html.indexOf('Last received') > -1 || html.indexOf('Never') > -1);
+  check('flags a never-served devotee', html.indexOf('Never') > -1);
+  check('shows where each devotee sits in the rotation', html.indexOf('rotation') > -1 || html.indexOf('open right now') > -1);
+  check('offers the overdue filter', html.indexOf('Overdue') > -1);
+
+  log('');
+  log('====== M: setup / sequence editing ======');
+  await loadConfig();
+  html = document.getElementById('tab-config').innerHTML;
+  check('config renders the sequence', html.indexOf('Area Sequence') > -1);
+  check('sequence rows are draggable', html.indexOf('seq-row') > -1 && html.indexOf('draggable="true"') > -1);
+  check('batch grouping is visible', html.indexOf('batch: CD') > -1);
+  check('shows which area is open now', html.indexOf('open now') > -1);
+  check('accounts section present for superAdmin', html.indexOf('Accounts') > -1);
+
+  log('');
+  log('====== N: reports ======');
+  await loadReports();
+  html = document.getElementById('tab-reports').innerHTML;
+  check('reports render', html.length > 500);
+  check('headline coverage KPI present', html.indexOf('Covered in') > -1);
+  check('area health table present', html.indexOf('Area health') > -1);
+  check('round history present', html.indexOf('Round history') > -1);
+  check('recent seva log present', html.indexOf('Recent seva') > -1);
+  check('early close is surfaced in history', html.indexOf('Closed early') > -1);
+
+  log('');
+  log('====== O: role gating ======');
+  AppState.userRole = 'sevadar';
+  applyRoleUI();
+  const hidden = [...document.querySelectorAll('.tab')].filter(t => t.classList.contains('hidden')).map(t => t.dataset.tab);
+  check('sevadar cannot see the rotation dashboard', hidden.indexOf('rotation') > -1, hidden.join(','));
+  check('sevadar cannot see the directory', hidden.indexOf('devotees') > -1);
+  check('sevadar cannot see setup', hidden.indexOf('config') > -1);
+  check('sevadar CAN see the checklist', hidden.indexOf('checklist') === -1);
+  check('sevadar lands on the checklist', AppState.currentTab === 'checklist', AppState.currentTab);
+
+  AppState.userRole = 'admin';
+  applyRoleUI();
+  check('admin sees everything', [...document.querySelectorAll('.tab')].every(t => !t.classList.contains('hidden')));
+  check('admin lands on the rotation dashboard', AppState.currentTab === 'rotation');
+  check('legacy "driver" role still maps to sevadar rank',
+        ROLE_RANK['driver'] === ROLE_RANK['sevadar']);
+
+  log('');
+  log('====== P: optional distance ordering (PRD 8) ======');
+  AppState.userRole = 'superAdmin';
+  const pending = DEVOTEES.filter(d => d.areaId === 'A' && hasCoords(d));
+  const ord = await Solver.orderChecklist(pending, { startPoint: SETTINGS.startPoint, areas: AREAS });
+  check('ordering returns every mappable devotee', ord.ordered.length === pending.length);
+  check('ordering numbers them 1..n', ord.ordered.every((d, i) => d.sequence === i + 1));
+  check('ordering reports a distance', typeof ord.totalKm === 'number');
+  const withNoPin = await Solver.orderChecklist([...pending, mk('99','A',{lat:null,lng:null})], { areas: AREAS });
+  check('un-pinned devotees are set aside, not dropped', withNoPin.unmappable.length === 1);
+  check('ordering works with no start point configured',
+        (await Solver.orderChecklist(pending, { areas: AREAS })).ordered.length === pending.length);
+
+  log('');
+  log('====== Q: exports ======');
+  let wrote = null; const realW = XLSX.writeFile;
+  XLSX.writeFile = (wb, name) => { wrote = { wb, name }; };
+  await window.exportDevotees();
+  check('directory export builds a workbook', !!wrote);
+  check('export includes the coverage columns',
+        wrote && String(wrote.wb.Sheets['Devotees']['G1'].v).indexOf('Last received') > -1,
+        wrote && wrote.wb.Sheets['Devotees']['G1'].v);
+  wrote = null;
+  await window.exportCoverage();
+  check('coverage export builds a workbook', !!wrote);
+  check('coverage export has both sheets',
+        wrote && wrote.wb.SheetNames.join(',') === 'Needs attention,Round history',
+        wrote && wrote.wb.SheetNames.join(','));
+  XLSX.writeFile = realW;
+
+  log('');
+  log('====== R: modals ======');
+  const before = __errors.length;
+  await window.editDevotee();
+  check('add-devotee modal opens', !!document.getElementById('dv-name'));
+  check('devotee form has no meal fields', document.querySelectorAll('.dv-meal').length === 0);
+  closeModal('devotee-modal');
+  window.editArea();
+  check('area modal opens with batch field', !!document.getElementById('ar-batch'));
+  closeModal('area-modal');
+  window.openImportModal();
+  check('import modal opens', !!document.getElementById('imp-file'));
+  closeModal('import-modal');
+  check('no JS errors from modals', __errors.length === before, __errors.slice(before).join(' | '));
+
+  log('');
+  log('============================================================');
+  log('  PASS ' + pass + '   FAIL ' + fail + '   JS ERRORS ' + __errors.length);
+  if (failures.length) { log(''); log('  FAILURES:'); failures.forEach(f => log('   x ' + f)); }
+  if (__errors.length) { log(''); log('  JS ERRORS:'); __errors.forEach(e => log('   ! ' + e)); }
+  log('============================================================');
+  done();
+}
+
+setTimeout(() => { main().catch(e => { log('HARNESS ERROR: ' + (e && e.stack || e)); done(); }); }, 300);
+</script>
+</body></html>

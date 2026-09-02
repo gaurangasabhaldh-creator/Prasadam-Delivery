@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Rotation engine tests</title>
+<link rel="stylesheet" href="../css/style.css"></head><body>
+<pre id="out" style="white-space:pre-wrap;font-size:12px;padding:1rem"></pre>
+<script>
+var __lines = [];
+function log(s){ __lines.push(String(s)); }
+function done(){ document.getElementById('out').textContent = __lines.join('\n'); document.title='DONE'; }
+window.onerror = function(m,u,l){ log('ERROR: '+m+' @line '+l); done(); };
+</script>
+<script src="./firebase-stub.js"></script>
+<script src="../js/firebase-config.js"></script>
+<script src="../js/config.js"></script>
+<script src="../js/rotation.js"></script>
+<script>
+let pass = 0, fail = 0; const failures = [];
+function check(name, cond, detail) {
+  if (cond) { pass++; log('  ok   ' + name); }
+  else { fail++; failures.push(name + (detail ? ' -> ' + detail : '')); log('  FAIL ' + name + (detail ? ' -> ' + detail : '')); }
+}
+
+// ── FIXTURE: the PRD's own example  A -> B -> (C+D) -> E ──
+const AREAS = [
+  { id: 'A', name: 'Area A', sequencePosition: 1, batchGroup: null,   isActive: true },
+  { id: 'B', name: 'Area B', sequencePosition: 2, batchGroup: null,   isActive: true },
+  { id: 'C', name: 'Area C', sequencePosition: 3, batchGroup: 'CD',   isActive: true },
+  { id: 'D', name: 'Area D', sequencePosition: 4, batchGroup: 'CD',   isActive: true },
+  { id: 'E', name: 'Area E', sequencePosition: 5, batchGroup: null,   isActive: true }
+];
+
+function dev(id, areaId, extra = {}) {
+  return { id, name: 'Dev ' + id, areaId, status: 'active', isActive: true,
+           servedInRound: null, timesServed: 0, carriedForwardFrom: null, ...extra };
+}
+
+function main() {
+  log('====== 1: sequence building (PRD 5.1) ======');
+  const seq = buildSequence(AREAS);
+  check('sequence collapses C and D into one batch', seq.length === 4, seq.length + ' batches');
+  check('order is A, B, C+D, E',
+        seq.map(b => b.label).join(' -> ') === 'Area A -> Area B -> Area C + Area D -> Area E',
+        seq.map(b => b.label).join(' -> '));
+  check('batched entry carries both area ids',
+        seq[2].areaIds.length === 2 && seq[2].areaIds.includes('C') && seq[2].areaIds.includes('D'));
+  check('batch sits at its earliest member position', seq[2].position === 3, String(seq[2].position));
+  check('ungrouped areas keep their own batch', seq[0].areaIds.length === 1);
+
+  // Out-of-order input must still produce the right sequence.
+  const shuffled = [AREAS[4], AREAS[2], AREAS[0], AREAS[3], AREAS[1]];
+  check('input order does not matter',
+        buildSequence(shuffled).map(b => b.label).join(',') === seq.map(b => b.label).join(','));
+  check('inactive areas drop out of the sequence',
+        buildSequence([...AREAS, { id: 'Z', name: 'Gone', sequencePosition: 6, isActive: false }]).length === 4);
+  check('empty area list yields empty sequence', buildSequence([]).length === 0);
+
+  log('');
+  log('====== 2: checklist for the open batch (PRD 5.2, 11) ======');
+  const state1 = { roundNumber: 1, batchKey: 'a:A', areaIds: ['A'], label: 'Area A' };
+  const devotees = [
+    dev('d1', 'A'), dev('d2', 'A'), dev('d3', 'A'),
+    dev('p1', 'A', { status: 'paused' }),
+    dev('x1', 'B')                                   // different area
+  ];
+  let cl = Rotation.buildChecklist(devotees, state1);
+  check('checklist holds only the open area', cl.total === 3, String(cl.total));
+  check('paused devotee excluded from the count', cl.total === 3 && cl.paused.length === 1);
+  check('paused devotee is still surfaced separately', cl.paused[0].id === 'p1');
+  check('devotee from another area not included',
+        !cl.pending.some(d => d.id === 'x1') && !cl.served.some(d => d.id === 'x1'));
+  check('nothing served yet', cl.doneCount === 0 && cl.complete === false);
+
+  // Serve two of three.
+  const partly = devotees.map(d => ['d1','d2'].includes(d.id) ? { ...d, servedInRound: 1 } : d);
+  cl = Rotation.buildChecklist(partly, state1);
+  check('served count tracks progress', cl.doneCount === 2, String(cl.doneCount));
+  check('not complete while one remains', cl.complete === false);
+  check('remaining devotee still pending', cl.pending.length === 1 && cl.pending[0].id === 'd3');
+
+  const allDone = devotees.map(d => d.areaId === 'A' && d.status !== 'paused' ? { ...d, servedInRound: 1 } : d);
+  cl = Rotation.buildChecklist(allDone, state1);
+  check('complete when every ACTIVE devotee is served (paused ignored)', cl.complete === true);
+
+  // Progress is per round, not a boolean — round 2 resets with no writes.
+  cl = Rotation.buildChecklist(allDone, { ...state1, roundNumber: 2 });
+  check('round 2 shows everyone pending again with no data reset',
+        cl.doneCount === 0 && cl.pending.length === 3);
+
+  check('an area with only paused devotees does not wedge the rotation',
+        Rotation.buildChecklist([dev('q', 'A', { status: 'paused' })], state1).complete === true);
+  check('an empty area is complete rather than stuck',
+        Rotation.buildChecklist([], state1).complete === true);
+
+  log('');
+  log('====== 3: carried-forward devotees are prioritised (PRD 5.4) ======');
+  const withCarried = [
+    dev('n1', 'A'), dev('n2', 'A'),
+    dev('c1', 'A', { carriedForwardFrom: 1 })
+  ];
+  cl = Rotation.buildChecklist(withCarried, { ...state1, roundNumber: 2 });
+  check('missed devotee appears first on the next checklist',
+        cl.pending[0].id === 'c1', cl.pending.map(d => d.id).join(','));
+
+  log('');
+  log('====== 4: auto-advance and wraparound (PRD 5.1) ======');
+  let s = { roundNumber: 1, batchKey: 'a:A', areaIds: ['A'], label: 'Area A' };
+  let n = Rotation._nextState(s, seq);
+  check('A advances to B', n.state.batchKey === 'a:B', n.state.batchKey);
+  check('round does not change mid-sequence', n.state.roundNumber === 1);
+  check('advance is not flagged as a wrap', n.wrapped === false);
+
+  n = Rotation._nextState({ ...s, batchKey: 'a:B', areaIds: ['B'], label: 'Area B' }, seq);
+  check('B advances into the C+D batch', n.state.batchKey === 'g:CD', n.state.batchKey);
+  check('opening a batch opens BOTH its areas at once', n.state.areaIds.length === 2);
+
+  n = Rotation._nextState({ ...s, batchKey: 'g:CD', areaIds: ['C','D'], label: 'Area C + Area D' }, seq);
+  check('C+D advances to E', n.state.batchKey === 'a:E');
+
+  n = Rotation._nextState({ ...s, batchKey: 'a:E', areaIds: ['E'], label: 'Area E' }, seq);
+  check('last batch wraps back to the first', n.state.batchKey === 'a:A', n.state.batchKey);
+  check('wraparound increments the round number', n.state.roundNumber === 2, String(n.state.roundNumber));
+  check('wrap is flagged as such', n.wrapped === true);
+
+  // Round 7 -> 8 across a wrap, to be sure the increment is not hardcoded.
+  n = Rotation._nextState({ roundNumber: 7, batchKey: 'a:E', areaIds: ['E'], label: 'Area E' }, seq);
+  check('round increments from any round number', n.state.roundNumber === 8, String(n.state.roundNumber));
+
+  // A batch removed from the sequence must not strand the rotation.
+  n = Rotation._nextState({ roundNumber: 3, batchKey: 'a:GONE', areaIds: ['GONE'], label: 'Deleted' }, seq);
+  check('an unknown open batch recovers to the start of the sequence',
+        n.state.batchKey === 'a:A' && n.state.roundNumber === 4, n.state.batchKey);
+
+  log('');
+  log('====== 5: full cycle simulation ======');
+  // Walk two complete rounds and confirm every area is covered each time.
+  let state = { roundNumber: 1, batchKey: seq[0].key, areaIds: seq[0].areaIds, label: seq[0].label };
+  const visits = {};
+  for (let step = 0; step < 8; step++) {
+    state.areaIds.forEach(a => { visits[a] = (visits[a] || 0) + 1; });
+    const adv = Rotation._nextState(state, seq);
+    state = adv.state;
+  }
+  check('every area was covered exactly twice over two rounds',
+        ['A','B','C','D','E'].every(a => visits[a] === 2), JSON.stringify(visits));
+  check('two full rounds land back at round 3', state.roundNumber === 3, String(state.roundNumber));
+
+  log('');
+  log('====== 6: sequence dashboard projection (PRD 7.2) ======');
+  const dash = Rotation.describeSequence(AREAS,
+    [dev('a1','A',{servedInRound:1}), dev('b1','B'), dev('c1','C'), dev('e1','E')],
+    { roundNumber: 1, batchKey: 'a:B', areaIds: ['B'], label: 'Area B' });
+  check('exactly one batch reports as open', dash.filter(b => b.isOpen).length === 1);
+  check('the open batch is B', dash.find(b => b.isOpen).key === 'a:B');
+  check('batches before the open one read as closed',
+        dash[0].status === 'closed', dash[0].status);
+  check('batches after the open one read as upcoming',
+        dash[2].status === 'upcoming' && dash[3].status === 'upcoming');
+  check('each batch reports its devotee count',
+        dash[0].devoteeCount === 1 && dash[1].devoteeCount === 1);
+
+  log('');
+  log('====== 7: what a devotee is told about their coverage (PRD 5.3) ======');
+  const st = { roundNumber: 2, batchKey: 'a:B', areaIds: ['B'], label: 'Area B' };
+  const o = (d) => Rotation.coverageOutlook(d, AREAS, st).text;
+
+  check('devotee in the open area is told they are on the live list',
+        o(dev('x','B')).indexOf('open right now') > -1, o(dev('x','B')));
+  check('devotee already served this round is told so',
+        o(dev('x','B',{servedInRound:2})).indexOf('Served in round 2') > -1, o(dev('x','B',{servedInRound:2})));
+  check('devotee in an upcoming area is told when they come up',
+        o(dev('x','E')).indexOf('Area E') > -1 && o(dev('x','E')).indexOf('batches away') > -1,
+        o(dev('x','E')));
+  check('devotee in a passed area is told they will be caught next time',
+        o(dev('x','A')).indexOf('reopens') > -1, o(dev('x','A')));
+  check('paused devotee is told they are out of the rotation',
+        o(dev('x','B',{status:'paused'})).indexOf('Paused') > -1);
+  check('devotee with no area is warned they will never be covered',
+        o(dev('x',null)).indexOf('No area') > -1, o(dev('x',null)));
+  check('outlook is safe before the rotation has started',
+        Rotation.coverageOutlook(dev('x','B'), AREAS, null).text.indexOf('not been started') > -1);
+
+  log('');
+  log('====== 8: helpers ======');
+  check('isServedInRound matches only the same round',
+        isServedInRound({ servedInRound: 3 }, 3) === true &&
+        isServedInRound({ servedInRound: 2 }, 3) === false);
+  check('a never-served devotee is not served in any round',
+        isServedInRound({ servedInRound: null }, 1) === false);
+  check('isActiveDevotee excludes paused and deleted',
+        isActiveDevotee({ status: 'active', isActive: true }) === true &&
+        isActiveDevotee({ status: 'paused', isActive: true }) === false &&
+        isActiveDevotee({ status: 'active', isActive: false }) === false);
+  check('daysSince returns null for never', daysSince(null) === null);
+  check('fmtAgo reads "never" when unserved', fmtAgo(null) === 'never');
+  check('fmtAgo reads "today" for now', fmtAgo(new Date().toISOString()) === 'today');
+
+  log('');
+  log('============================================================');
+  log('  PASS ' + pass + '   FAIL ' + fail);
+  if (failures.length) { log(''); log('  FAILURES:'); failures.forEach(f => log('   x ' + f)); }
+  log('============================================================');
+  done();
+}
+
+try { main(); } catch (e) { log('HARNESS ERROR: ' + (e && e.stack || e)); done(); }
+</script>
+</body></html>

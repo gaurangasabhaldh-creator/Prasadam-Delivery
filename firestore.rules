@@ -1,0 +1,176 @@
+rules_version = '2';
+
+/*
+  SevaRoute security rules.
+
+  Devotee addresses and phone numbers are sensitive, so read access
+  is never public — every rule below requires an authenticated user with a
+  profile document. The role hierarchy is:
+
+      sevadar (1) -> admin (2) -> superAdmin (3)
+
+  Legacy role values from the earlier meal-based build are mapped so
+  existing logins keep working rather than dropping to zero privileges.
+
+  Deploy with:  firebase deploy --only firestore:rules
+*/
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasProfile() {
+      return signedIn() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function rank() {
+      return hasProfile()
+        ? {'sevadar': 1, 'admin': 2, 'superAdmin': 3,
+           'driver': 1, 'dispatcher': 2}[profile().role]
+        : 0;
+    }
+
+    function atLeast(level) {
+      return rank() >= level;
+    }
+
+    function ownerClaimed() {
+      return exists(/databases/$(database)/documents/settings/bootstrap);
+    }
+
+    // ── USERS ──
+    match /users/{uid} {
+      // `get` and `list` are split deliberately. A list query is evaluated
+      // WITHOUT knowing which documents it returns, so a condition like
+      // "request.auth.uid == uid" can never authorise one. Lumping them
+      // together under `read` is what deadlocked first-run signup.
+      allow get:  if signedIn() && (request.auth.uid == uid || atLeast(2));
+      allow list: if atLeast(2);
+
+      // Self-registration only, and the role is pinned by the rules — not
+      // trusted from the client:
+      //   • the very first account may claim superAdmin, but only while no
+      //     owner has been recorded;
+      //   • everybody after that self-registers as a plain sevadar and must
+      //     be promoted by a superAdmin.
+      allow create: if signedIn()
+                    && request.auth.uid == uid
+                    && (
+                         (request.resource.data.role == 'superAdmin' && !ownerClaimed())
+                         || request.resource.data.role == 'sevadar'
+                       );
+
+      // Only a superAdmin changes roles.
+      allow update: if atLeast(3);
+      allow delete: if false;
+    }
+
+    // ── BOOTSTRAP MARKER ──
+    // Records who claimed this instance. Must be readable by a signed-in user
+    // who has no profile yet, because that read is exactly how signup decides
+    // whether it is the first account.
+    match /settings/bootstrap {
+      allow read: if signedIn();
+      // Write-once: creatable only while unclaimed, and only naming yourself.
+      allow create: if signedIn()
+                    && !ownerClaimed()
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ── SETTINGS (start point, thresholds) ──
+    match /settings/{doc} {
+      allow read: if hasProfile();
+      // Rules OR together across matching blocks, so this must explicitly
+      // exclude 'bootstrap' — otherwise an admin could clear the ownership
+      // marker here and let the next signup claim superAdmin.
+      allow write: if atLeast(2) && doc != 'bootstrap' && doc != 'rotation';
+    }
+
+    // ── ROTATION STATE ──
+    // Sevadars must be able to ADVANCE the rotation: completing the last
+    // devotee is what opens the next area, and that write happens inside
+    // their transaction. They cannot create or delete it, only move it on.
+    match /settings/rotation {
+      allow read: if hasProfile();
+      allow write: if atLeast(1);
+    }
+
+    // ── AREAS ──
+    match /areas/{id} {
+      allow read:  if hasProfile();
+      allow write: if atLeast(2);
+    }
+
+    // ── ROUND HISTORY ──
+    // Written when a batch closes — which a sevadar's final tick triggers.
+    //
+    // create AND update both sit at sevadar level on purpose. The document id
+    // is {round}_{batch}, so if an admin force-closes a batch and then jumps
+    // back to it in the same round, the next completion writes the SAME id —
+    // which Firestore evaluates as an update, not a create. Requiring admin
+    // for update would make that tick fail for a sevadar and wedge the
+    // rotation. The real audit trail is coverageLog, which stays append-only.
+    match /rounds/{id} {
+      allow read:          if hasProfile();
+      allow create, update: if atLeast(1);
+      allow delete:        if false;
+    }
+
+    // ── COVERAGE LOG (the seva record) ──
+    // Append-only: this audit trail is the backbone of the "no one missed"
+    // guarantee (PRD §10), so nothing may edit or erase an entry.
+    match /coverageLog/{id} {
+      allow read:   if hasProfile();
+      allow create: if hasProfile();
+      allow update, delete: if false;
+    }
+
+    // ── DEVOTEES — the sensitive collection ──
+    match /devotees/{id} {
+      // A sevadar must read the directory: the open checklist is derived
+      // from it, and they need name, address and phone to deliver.
+      allow read:   if atLeast(1);
+      allow create: if atLeast(2);
+
+      // Admins may edit anything. A sevadar may only record coverage —
+      // the fields below — so they cannot rename, reassign or delete
+      // anyone while ticking off a list.
+      allow update: if atLeast(2) || (
+        rank() >= 1 &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['servedInRound', 'lastServedAt', 'lastServedAreaId',
+                    'timesServed', 'carriedForwardFrom',
+                    'updatedAt', 'updatedAtClient', 'updatedBy'])
+      );
+      // Soft-delete only — the app sets isActive:false and never hard-deletes.
+      allow delete: if false;
+
+      match /profileChanges/{changeId} {
+        allow read:   if atLeast(2);
+        allow create: if atLeast(2);
+        allow update, delete: if false;
+      }
+    }
+
+    // ── AUDIT LOG ──
+    match /auditLog/{id} {
+      allow read:   if atLeast(2);
+      allow create: if hasProfile();
+      allow update, delete: if false;
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

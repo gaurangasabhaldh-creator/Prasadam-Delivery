@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1a5c3a">
+<title>SevaRoute — Prasadam Coverage</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Nunito:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+<!-- ══ SETUP GATE — shown when firebase-config.js is still on placeholders ══ -->
+<div id="setup-screen" class="fullscreen hidden">
+  <div class="setup-card">
+    <div class="brand"><i class="fa-solid fa-route"></i><h1>SevaRoute</h1></div>
+    <h2>One step before you start</h2>
+    <p>Open <code>js/firebase-config.js</code> and paste your Firebase project's config into it. The file has a comment above every field explaining where to find it.</p>
+    <p class="muted">Full walkthrough is in <code>SETUP.md</code>. Nothing else needs configuring — the rotation engine needs no external API at all.</p>
+    <button class="btn primary" onclick="location.reload()"><i class="fa-solid fa-rotate"></i> I've done that — reload</button>
+  </div>
+</div>
+
+<!-- ══ AUTH ══ -->
+<div id="auth-screen" class="fullscreen hidden">
+  <div class="auth-card">
+    <div class="brand"><i class="fa-solid fa-route"></i><h1>SevaRoute</h1></div>
+    <p class="tagline">Every devotee, every round — no one left out</p>
+
+    <div id="auth-error" class="alert danger hidden"></div>
+
+    <label>Email</label>
+    <input type="email" id="auth-email" autocomplete="username" placeholder="you@example.com">
+
+    <label>Password</label>
+    <div class="password-wrap">
+      <input type="password" id="auth-password" autocomplete="current-password" placeholder="••••••••">
+      <button type="button" class="password-toggle" id="auth-password-toggle"
+              aria-label="Show password" aria-pressed="false" title="Show password">
+        <i class="fa-solid fa-eye"></i>
+      </button>
+    </div>
+
+    <button class="btn primary block" id="auth-submit"><i class="fa-solid fa-right-to-bracket"></i> <span>Sign In</span></button>
+    <button class="btn ghost block" id="auth-toggle">Create an account instead</button>
+    <p class="muted small" id="auth-hint">The first account created becomes the Super Admin.</p>
+  </div>
+</div>
+
+<!-- ══ APP ══ -->
+<div id="app" class="hidden">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <i class="fa-solid fa-route brand-icon"></i>
+      <div>
+        <div class="topbar-title">SevaRoute</div>
+        <div class="topbar-sub" id="topbar-sub">Prasadam Coverage</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="badge" id="user-role-badge"></span>
+      <button class="icon-btn" id="btn-signout" title="Sign out"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab" data-tab="rotation"  data-min-role="admin"><i class="fa-solid fa-arrows-spin"></i><span>Rotation</span></button>
+    <button class="tab" data-tab="checklist" data-min-role="sevadar"><i class="fa-solid fa-list-check"></i><span>Checklist</span></button>
+    <button class="tab" data-tab="devotees"  data-min-role="admin"><i class="fa-solid fa-users"></i><span>Devotees</span></button>
+    <button class="tab" data-tab="config"    data-min-role="admin"><i class="fa-solid fa-sliders"></i><span>Setup</span></button>
+    <button class="tab" data-tab="reports"   data-min-role="admin"><i class="fa-solid fa-chart-line"></i><span>Reports</span></button>
+  </nav>
+
+  <main>
+    <section id="tab-rotation"  class="tabpanel hidden"></section>
+    <section id="tab-checklist" class="tabpanel hidden"></section>
+    <section id="tab-devotees"  class="tabpanel hidden"></section>
+    <section id="tab-config"    class="tabpanel hidden"></section>
+    <section id="tab-reports"   class="tabpanel hidden"></section>
+  </main>
+</div>
+
+<!-- ══ MODALS ══ -->
+<div id="devotee-modal" class="modal hidden"><div class="modal-box"></div></div>
+<div id="area-modal" class="modal hidden"><div class="modal-box"></div></div>
+<div id="pin-modal" class="modal hidden"><div class="modal-box wide"></div></div>
+<div id="import-modal" class="modal hidden"><div class="modal-box wide"></div></div>
+<div id="stop-modal" class="modal hidden"><div class="modal-box"></div></div>
+<div id="confirm-modal" class="modal hidden"><div class="modal-box narrow"></div></div>
+
+<div id="toast-host" class="toast-host"></div>
+<div id="busy" class="busy hidden"><div class="spinner"></div><div id="busy-text">Working…</div></div>
+
+<!-- ══ VENDOR ══ -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="./js/xlsx-js-style.bundle.js"></script>
+
+<!-- ══ APP ══ -->
+<script src="./js/firebase-config.js"></script>
+<script src="./js/config.js"></script>
+<script src="./js/db.js"></script>
+<script src="./js/geo.js"></script>
+<script src="./js/rotation.js"></script>
+<script src="./js/solver.js"></script>
+<script src="./js/excel.js"></script>
+<script src="./js/ui-core.js"></script>
+<script src="./js/ui-rotation.js"></script>
+<script src="./js/ui-checklist.js"></script>
+<script src="./js/ui-devotees.js"></script>
+<script src="./js/ui-config.js"></script>
+<script src="./js/ui-reports.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
