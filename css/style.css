@@ -287,13 +287,82 @@ td.actions { white-space: nowrap; text-align: right; }
 .progress > div { height: 100%; background: var(--color-primary); transition: width .2s; }
 
 /* ── RESPONSIVE ────────────────────────────────────── */
+/* ══ MOBILE ═══════════════════════════════════════════════════════════
+   The sevadar uses this one-handed, outdoors, on a cheap phone. Below
+   640px the navigation moves to the BOTTOM so it sits under the thumb,
+   modals become bottom sheets, and every control clears the 44px target
+   that fingers actually need.
+═════════════════════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
+  main {
+    padding: .7rem;
+    /* Clear the fixed bottom bar plus the home-indicator strip. */
+    padding-bottom: calc(4.9rem + env(safe-area-inset-bottom));
+  }
+
+  .tabs {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+    border-top: 1px solid var(--border); border-bottom: none;
+    box-shadow: 0 -2px 12px rgba(16,32,24,.10);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tab {
+    min-width: 0; padding: .5rem .25rem; min-height: 52px;
+    border-bottom: none; border-top: 3px solid transparent;
+  }
+  .tab.active { border-top-color: var(--color-primary); border-bottom-color: transparent; }
+  .tab i { font-size: 1.15rem; }
+  .tab span { font-size: .65rem; }
+
+  .topbar { padding: .55rem .8rem; }
+  .topbar-title { font-size: 1rem; }
+  .topbar-sub { font-size: .68rem; max-width: 45vw; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: .6rem; padding: .15rem .4rem; }
+
   .grid-2 { grid-template-columns: 1fr; }
-  .tab span { font-size: .7rem; }
-  main { padding: .75rem; }
-  .modal-box { padding: 1rem; }
-  th, td { padding: .4rem .45rem; font-size: .85rem; }
+  .card { padding: .85rem; border-radius: 10px; }
+  h2 { font-size: 1.1rem; }
+  .stats { grid-template-columns: repeat(2, 1fr); gap: .5rem; }
+  .stat { padding: .6rem .4rem; }
+  .stat-value { font-size: 1.25rem; }
+  .stat-label { font-size: .62rem; }
+
+  /* Modals as bottom sheets — reachable, and they don't fight the keyboard. */
+  .modal { align-items: flex-end; padding: 0; }
+  .modal-box {
+    max-width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0;
+    padding: 1.1rem 1rem calc(1.1rem + env(safe-area-inset-bottom));
+    animation: sheet-up .2s ease-out;
+  }
+  .modal-foot { position: sticky; bottom: 0; background: var(--surface);
+                padding-top: .6rem; margin-top: .8rem; }
+  .modal-foot .btn { flex: 1 1 0; min-height: 46px; }
+
+  /* 16px stops iOS zooming the page when a field is focused. */
+  input, select, textarea { font-size: 16px; min-height: 44px; }
+  textarea { min-height: 72px; }
+  .btn { min-height: 44px; }
+  .btn.sm { min-height: 38px; padding: .45rem .7rem; }
+  .icon-btn { min-width: 40px; min-height: 40px; }
+
+  th, td { padding: .45rem .4rem; font-size: .82rem; }
+  .seq-row { padding: .7rem .6rem; }
+  .toast-host { bottom: calc(4.6rem + env(safe-area-inset-bottom)); width: 92vw; }
 }
+
+@keyframes sheet-up { from { transform: translateY(14px); opacity: .85; } to { transform: none; opacity: 1; } }
+
+/* Standalone (installed) — the app owns the whole screen, so pad the notch. */
+@media (display-mode: standalone) {
+  .topbar { padding-top: calc(.55rem + env(safe-area-inset-top)); }
+}
+
+/* Coarse pointers get bigger targets regardless of screen width. */
+@media (pointer: coarse) {
+  .btn, .icon-btn, .tab { min-height: 44px; }
+}
+
 
 @media print {
   .topbar, .tabs, .btn, .icon-btn, .toast-host { display: none !important; }
@@ -350,32 +419,50 @@ td.actions { white-space: nowrap; text-align: right; }
   color: #fff; display: grid; place-items: center; font-size: .78rem; font-weight: 800;
 }
 
-/* ── CHECKLIST ─────────────────────────────────────── */
+/* ── CHECKLIST CARD ────────────────────────────────── */
 .cl-search { margin-bottom: .75rem; }
 .check-card {
-  display: flex; gap: .8rem; align-items: flex-start;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: .8rem; margin-bottom: .6rem; box-shadow: var(--shadow);
+  border-radius: var(--radius); padding: .85rem; margin-bottom: .7rem;
+  box-shadow: var(--shadow);
 }
-.check-card.done { opacity: .55; }
-/* Deliberately oversized: this is tapped one-handed, outdoors, often in
-   a hurry — a small target here is the difference between a record and
-   a guess. */
+.check-card.done { opacity: .6; background: var(--surface-2); }
+.check-head { display: flex; gap: .75rem; align-items: flex-start; }
+.chip-row:empty { display: none; }
+.chip-row { display: flex; gap: .3rem; flex-wrap: wrap; margin: .2rem 0; }
+
+/* Status marker, not a control — the button below is the action. */
 .tick {
-  flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%;
+  flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%;
   border: 2px solid var(--border); background: var(--surface);
-  color: var(--color-muted); font-size: 1.1rem; cursor: pointer;
-  display: grid; place-items: center; transition: all .12s;
+  color: var(--color-muted); font-size: .8rem;
+  display: grid; place-items: center;
 }
-.tick:hover { border-color: var(--color-success); color: var(--color-success); }
 .tick.on { background: var(--color-success); border-color: var(--color-success); color: #fff; }
-.tick:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-primary-soft); }
+
+/* THE action on this screen. Full width, thumb-sized, unmistakable. */
+.served-btn {
+  width: 100%; margin-top: .75rem;
+  background: var(--color-success); border-color: var(--color-success); color: #fff;
+  font-size: 1rem; font-weight: 700; padding: .8rem;
+  min-height: 48px;
+}
+.served-btn:hover:not(:disabled) { background: #17703d; border-color: #17703d; }
+.served-btn:active { transform: scale(.985); }
+.undo-btn { color: var(--text-soft); }
+
+.check-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .55rem; }
+.check-actions .btn { flex: 1 1 0; min-width: 96px; min-height: 42px; text-decoration: none; }
 
 .list-actions { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
 .list-actions .btn { text-decoration: none; }
 
 .stop-name { font-weight: 700; }
 .stop-sub { font-size: .8rem; color: var(--text-soft); }
+.stop-seq {
+  flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--color-primary);
+  color: #fff; display: grid; place-items: center; font-size: .78rem; font-weight: 800;
+}
 .map { height: 340px; border-radius: var(--radius); border: 1px solid var(--border); }
 .map.tall { height: 60vh; }
 /* Leaflet writes this class itself; not found in our markup by design. */
@@ -383,5 +470,7 @@ td.actions { white-space: nowrap; text-align: right; }
 
 @media print {
   .check-card { break-inside: avoid; }
-  .tick, .list-actions { display: none !important; }
+  .tick, .check-actions, .served-btn { display: none !important; }
 }
+
+

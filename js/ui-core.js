@@ -141,8 +141,15 @@ function applyRoleUI() {
   });
 
   // A sevadar's whole job is the open checklist, so that is where they
-  // land. Admins land on the rotation dashboard.
-  const preferred = hasRole('admin') ? 'rotation' : 'checklist';
+  // land. Admins land on the rotation dashboard. A home-screen shortcut
+  // (#checklist / #rotation) overrides both, but only if the role allows it.
+  let preferred = hasRole('admin') ? 'rotation' : 'checklist';
+  const wanted = window._pendingTab;
+  if (wanted && TAB_LOADERS[wanted]) {
+    const tab = document.querySelector(`.tab[data-tab="${wanted}"]`);
+    if (tab && !tab.classList.contains('hidden')) preferred = wanted;
+  }
+  window._pendingTab = null;
   switchTab(preferred || firstVisible || 'checklist');
 }
 

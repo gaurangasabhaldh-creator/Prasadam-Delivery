@@ -97,6 +97,25 @@ Maps appear in two places only, both optional:
 **A devotee without a map pin is still fully in the rotation** and still on the
 checklist. A pin only helps sort the stops.
 
+## Installing it on a phone
+
+It is a PWA, so it installs to the home screen and runs full-screen with no
+browser bar.
+
+- **Android / Chrome** — an install button appears in the top bar; or menu →
+  *Add to Home screen*.
+- **iPhone / Safari** — Share → *Add to Home Screen* (iOS gives no install
+  button; that is an Apple limitation, not a missing feature).
+
+Once installed it works **offline**: the app shell is cached, and any devotee a
+sevadar ticks off with no signal is queued by Firestore and syncs the moment
+they are back online.
+
+The interface is built for a phone held in one hand: navigation sits at the
+**bottom** within thumb reach, **Mark served** is a full-width button on each
+card, dialogs slide up as bottom sheets, and every control clears the 44px
+target that fingers actually need.
+
 ## Roles
 
 | Role | Can do |
@@ -158,7 +177,7 @@ sw.js                   service worker (bump CACHE on every deploy)
 tests/parse.html        parses every module with the real JS engine
 tests/rotation.html     52 assertions on the rotation engine
 tests/edge.html         95 assertions on edge cases, link parsing, past bugs
-tests/smoke.html        107 assertions across the whole app
+tests/smoke.html        129 assertions across the whole app
 ```
 
 ## Conventions

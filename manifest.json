@@ -1,20 +1,36 @@
 {
-  "name": "SevaRoute — Prasadam Delivery",
+  "id": "sevaroute-prasadam-coverage",
+  "name": "SevaRoute — Prasadam Coverage",
   "short_name": "SevaRoute",
-  "description": "Route-optimised prasadam delivery for a trust kitchen",
+  "description": "Area-wise prasadam coverage rotation, so no devotee is ever missed.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f6f8f7",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#1a5c3a",
   "theme_color": "#1a5c3a",
-  "orientation": "portrait-primary",
+  "orientation": "portrait",
+  "lang": "en-IN",
+  "dir": "ltr",
+  "categories": ["productivity", "utilities"],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "My Route", "url": "./index.html#myroute", "description": "Today's delivery route" },
-    { "name": "Route Board", "url": "./index.html#routes", "description": "All routes for today" }
+    {
+      "name": "Today's checklist",
+      "short_name": "Checklist",
+      "url": "./index.html#checklist",
+      "description": "The area that is open right now"
+    },
+    {
+      "name": "Rotation status",
+      "short_name": "Rotation",
+      "url": "./index.html#rotation",
+      "description": "Which area is open and what comes next"
+    }
   ]
 }

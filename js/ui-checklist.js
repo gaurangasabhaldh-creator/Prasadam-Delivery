@@ -124,27 +124,44 @@ function renderChecklistRow(d, area, isServed) {
   const nav = navUrlFor(d, area?.name, area?.city);
   const carried = !!d.carriedForwardFrom;
 
+  // "Mark served" is THE action on this screen, so it is a full-width button
+  // in its own right — not something hidden behind a note dialog. Everything
+  // else (call, navigate, note) is secondary and sits below it.
   return `
   <div class="check-card ${isServed ? 'done' : ''}">
-    <button class="tick ${isServed ? 'on' : ''}"
-            aria-label="${isServed ? 'Undo' : 'Mark served'}"
-            onclick="window.${isServed ? 'undoServe' : 'markServed'}('${d.id}')">
-      <i class="fa-solid ${isServed ? 'fa-check' : 'fa-circle'}"></i>
-    </button>
-    <div class="stop-body">
-      <div class="stop-name">${escapeHtml(d.name)}
-        ${carried ? '<span class="pill amber" title="Missed last time — please prioritise">Carried forward</span>' : ''}
-        ${(!hasCoords(d) && !d.mapsUrl) ? '<span class="pill red" title="No map link or pin — navigate by the written address">No location</span>' : ''}
+    <div class="check-head">
+      <div class="tick ${isServed ? 'on' : ''}" aria-hidden="true">
+        <i class="fa-solid ${isServed ? 'fa-check' : 'fa-circle'}"></i>
       </div>
-      <div class="stop-sub">${escapeHtml(area?.name || 'No area')}${d.addressText ? ' · ' + escapeHtml(d.addressText) : ''}</div>
-      ${d.notes ? `<div class="stop-sub"><i class="fa-solid fa-note-sticky"></i> ${escapeHtml(d.notes)}</div>` : ''}
-      <div class="stop-sub muted">Last received: ${fmtAgo(d.lastServedAt)}${d.timesServed ? ` · ${d.timesServed} time${d.timesServed === 1 ? '' : 's'}` : ''}</div>
-      <div class="list-actions">
-        ${d.phone ? `<a class="btn sm" href="tel:${escapeHtml(d.phone)}"><i class="fa-solid fa-phone"></i> Call</a>` : ''}
-        ${nav ? `<a class="btn sm primary" href="${nav}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right"></i> Navigate</a>` : ''}
-        ${!isServed ? `<button class="btn sm" onclick="window.markServedWithNote('${d.id}')"><i class="fa-solid fa-pen"></i> Note</button>` : ''}
+      <div class="stop-body">
+        <div class="stop-name">${escapeHtml(d.name)}</div>
+        <div class="chip-row">
+          ${carried ? '<span class="pill amber" title="Missed last time — please prioritise">Carried forward</span>' : ''}
+          ${(!hasCoords(d) && !d.mapsUrl) ? '<span class="pill red" title="No map link — use the written address">No location</span>' : ''}
+        </div>
+        <div class="stop-sub">${escapeHtml(area?.name || 'No area')}${d.addressText ? ' · ' + escapeHtml(d.addressText) : ''}</div>
+        ${d.notes ? `<div class="stop-sub"><i class="fa-solid fa-note-sticky"></i> ${escapeHtml(d.notes)}</div>` : ''}
+        <div class="stop-sub muted">Last received: ${fmtAgo(d.lastServedAt)}${d.timesServed ? ` · ${d.timesServed} time${d.timesServed === 1 ? '' : 's'}` : ''}</div>
       </div>
     </div>
+
+    ${isServed ? `
+      <div class="check-actions">
+        <button class="btn undo-btn" onclick="window.undoServe('${d.id}')">
+          <i class="fa-solid fa-rotate-left"></i> Undo
+        </button>
+        ${nav ? `<a class="btn" href="${nav}" target="_blank" rel="noopener">
+          <i class="fa-solid fa-diamond-turn-right"></i> Navigate</a>` : ''}
+      </div>`
+    : `
+      <button class="btn served-btn" onclick="window.markServed('${d.id}')">
+        <i class="fa-solid fa-check"></i> Mark served
+      </button>
+      <div class="check-actions">
+        ${d.phone ? `<a class="btn" href="tel:${escapeHtml(d.phone)}"><i class="fa-solid fa-phone"></i> Call</a>` : ''}
+        ${nav ? `<a class="btn" href="${nav}" target="_blank" rel="noopener"><i class="fa-solid fa-diamond-turn-right"></i> Navigate</a>` : ''}
+        <button class="btn" onclick="window.markServedWithNote('${d.id}')"><i class="fa-solid fa-pen"></i> Note</button>
+      </div>`}
   </div>`;
 }
 
@@ -206,7 +223,7 @@ function announceAdvance(advanced) {
 window.markServedWithNote = function (devoteeId) {
   openModal('stop-modal', `
     <div class="modal-head">
-      <h2>Add a note</h2>
+      <h2>Serve with a note</h2>
       <button class="icon-btn" onclick="closeModal('stop-modal')"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div class="field"><label>Note (optional)</label>

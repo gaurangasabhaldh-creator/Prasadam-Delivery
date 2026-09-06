@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>App smoke tests</title>
+<!-- Must mirror index.html exactly, viewport included — without it the
+     mobile media queries never match and the harness silently tests a
+     desktop layout. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- Must mirror index.html's stylesheets or rendered output won't match the real app. -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -264,6 +268,83 @@ async function main() {
   check('each row has a Navigate link',
         html.indexOf('google.com/maps') > -1 || html.indexOf('google.navigation') > -1);
   check('row shows when they last received', html.indexOf('Last received') > -1);
+
+  check('Mark served is a direct button on the card, not inside a dialog',
+        html.indexOf('served-btn') > -1 && html.indexOf("markServed('") > -1);
+  check('the note action is separate and secondary',
+        html.indexOf('markServedWithNote') > -1);
+  check('Mark served does NOT require opening the note dialog first',
+        html.indexOf('onclick="window.markServed(') > -1);
+
+  log('');
+  log('====== D2: PWA + mobile shell ======');
+  const manifest = await (await fetch('../manifest.json')).json();
+  check('manifest is valid and named for the rotation app',
+        manifest.name.indexOf('Coverage') > -1, manifest.name);
+  check('manifest installs standalone', manifest.display === 'standalone');
+  check('manifest has a maskable icon (round Android launchers)',
+        manifest.icons.some(i => String(i.purpose).indexOf('maskable') > -1));
+  check('manifest shortcuts point at tabs that exist',
+        manifest.shortcuts.every(sc => ['checklist','rotation','devotees','config','reports']
+          .some(t => sc.url.indexOf('#' + t) > -1)),
+        manifest.shortcuts.map(s => s.url).join(' '));
+  check('no meal-era shortcuts survive',
+        !JSON.stringify(manifest).match(/myroute|routes|Route Board|My Route/));
+
+  const indexSrc = await (await fetch('../index.html')).text();
+  // Inspect the actual meta tag, not the whole file — a comment mentioning
+  // "maximum-scale" must not read as the attribute being set.
+  const vp = (indexSrc.match(/<meta name="viewport" content="([^"]*)"/) || [])[1] || '';
+  check('viewport allows zoom (accessibility)',
+        !/maximum-scale|user-scalable\s*=\s*no/.test(vp), vp);
+  check('viewport-fit=cover set for notched phones',
+        indexSrc.indexOf('viewport-fit=cover') > -1);
+  check('iOS standalone meta present',
+        indexSrc.indexOf('apple-mobile-web-app-capable') > -1);
+  check('install prompt is captured rather than dismissed',
+        indexSrc.indexOf('beforeinstallprompt') > -1 && indexSrc.indexOf('e.preventDefault()') > -1);
+
+  const cssSrc = await (await fetch('../css/style.css')).text();
+  check('navigation moves to the bottom on phones',
+        /@media \(max-width: 640px\)[\s\S]*?\.tabs\s*\{[^}]*bottom:\s*0/.test(cssSrc));
+  check('layout respects the safe area / home indicator',
+        cssSrc.indexOf('env(safe-area-inset-bottom)') > -1);
+  check('inputs are 16px on mobile so iOS does not zoom the page',
+        /input, select, textarea \{ font-size: 16px/.test(cssSrc));
+  check('the Mark served button is thumb-sized',
+        /\.served-btn \{[\s\S]*?min-height: 48px/.test(cssSrc));
+  check('modals become bottom sheets on phones',
+        cssSrc.indexOf('sheet-up') > -1);
+
+  log('');
+  log('====== D3: mobile layout is actually in effect ======');
+  const vw = document.documentElement.clientWidth;
+  log('  (test viewport is ' + vw + 'px)');
+  if (vw <= 640) {
+    const tabs = getComputedStyle(document.getElementById('tabs'));
+    check('nav is pinned to the bottom for thumb reach',
+          tabs.position === 'fixed' && parseInt(tabs.bottom) === 0,
+          tabs.position + ' / ' + tabs.bottom);
+
+    const probe = document.createElement('input');
+    document.body.appendChild(probe);
+    const ph = getComputedStyle(probe);
+    check('inputs render at 16px so iOS will not zoom the page',
+          parseFloat(ph.fontSize) >= 16, ph.fontSize);
+    check('inputs clear the 44px touch target', parseFloat(ph.minHeight) >= 44, ph.minHeight);
+    probe.remove();
+
+    const modal = getComputedStyle(document.getElementById('confirm-modal'));
+    check('modals sit at the bottom as sheets', modal.alignItems === 'flex-end', modal.alignItems);
+  } else {
+    log('  (viewport above the breakpoint — desktop rules, skipped)');
+  }
+
+  // Nothing may spill sideways at any width; horizontal scroll on a phone
+  // makes the whole app feel broken.
+  check('no horizontal overflow at this width',
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+        document.documentElement.scrollWidth + ' vs ' + document.documentElement.clientWidth);
 
   log('');
   log('====== E: marking served, and auto-advance ======');

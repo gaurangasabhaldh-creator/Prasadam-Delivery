@@ -2,8 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- viewport-fit=cover lets the layout reach under a notch; the CSS then
+     pads it back with env(safe-area-inset-*). maximum-scale is deliberately
+     NOT set — capping zoom breaks accessibility for older sevadars. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1a5c3a">
+<meta name="description" content="Area-wise prasadam coverage rotation, so no devotee is ever missed.">
+
+<!-- iOS has no manifest support for install behaviour; these are its equivalents. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SevaRoute">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="format-detection" content="telephone=no">
 <title>SevaRoute — Prasadam Coverage</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
@@ -65,6 +76,9 @@
       </div>
     </div>
     <div class="topbar-right">
+      <button class="icon-btn hidden" id="btn-install" title="Install app">
+        <i class="fa-solid fa-arrow-down-to-bracket"></i><i class="fa-solid fa-mobile-screen-button"></i>
+      </button>
       <span class="badge" id="user-role-badge"></span>
       <button class="icon-btn" id="btn-signout" title="Sign out"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
     </div>
@@ -123,6 +137,37 @@
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
   }
+
+  // ── INSTALL PROMPT ──
+  // Chrome fires this instead of showing its own banner. Stash it and let
+  // the user install from the topbar whenever they choose.
+  let _installPrompt = null;
+  const installBtn = document.getElementById('btn-install');
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    _installPrompt = e;
+    if (installBtn) installBtn.classList.remove('hidden');
+  });
+
+  if (installBtn) installBtn.onclick = async () => {
+    if (!_installPrompt) return;
+    _installPrompt.prompt();
+    await _installPrompt.userChoice;
+    _installPrompt = null;
+    installBtn.classList.add('hidden');
+  };
+
+  window.addEventListener('appinstalled', () => {
+    _installPrompt = null;
+    if (installBtn) installBtn.classList.add('hidden');
+  });
+
+  // Opening a shortcut (#checklist / #rotation) should land on that tab.
+  window.addEventListener('load', () => {
+    const wanted = (location.hash || '').replace('#', '');
+    if (wanted) window._pendingTab = wanted;
+  });
 </script>
 </body>
 </html>

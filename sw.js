@@ -2,7 +2,7 @@
    BUMP THIS VERSION STRING on every deploy that changes HTML/JS/CSS.
    Without a bump, browsers keep serving the old cached files.
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-const CACHE = 'sevaroute-v8';
+const CACHE = 'sevaroute-v9';
 
 const SHELL = [
   './index.html',
