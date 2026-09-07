@@ -131,6 +131,9 @@ document.addEventListener('rotationChanged', () => {
 // ── ROLE-GATED UI ─────────────────────────────────────
 function applyRoleUI() {
   document.getElementById('user-role-badge').textContent = ROLE_LABEL[AppState.userRole] || '';
+  // Account management is an owner-only concern, so the hamburger only
+  // exists for them rather than appearing and then refusing to work.
+  document.getElementById('btn-users').classList.toggle('hidden', !hasRole('superAdmin'));
   document.getElementById('topbar-sub').textContent = AppState.userName || 'Prasadam Coverage';
 
   let firstVisible = null;
@@ -257,6 +260,13 @@ document.addEventListener('DOMContentLoaded', () => {
   wireAuth();
   document.querySelectorAll('.tab').forEach(tab => { tab.onclick = () => switchTab(tab.dataset.tab); });
 
+  // Esc closes the drawer, like every other dismissible surface.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const drawer = document.getElementById('user-drawer');
+    if (drawer && !drawer.classList.contains('hidden')) window.closeUserPanel();
+  });
+
   firebase.auth().onAuthStateChanged(async (user) => {
     const authScreen = document.getElementById('auth-screen');
     const app = document.getElementById('app');
@@ -270,6 +280,21 @@ document.addEventListener('DOMContentLoaded', () => {
     setBusy(true, 'Loading…');
     try {
       const profile = await DB.ensureUserProfile(user);
+
+      // A revoked account keeps its record so history survives, but must not
+      // get past this point. The rules deny it everything anyway; this is the
+      // difference between a clear message and a screen full of errors.
+      if (profile.disabled) {
+        await firebase.auth().signOut();
+        setBusy(false);
+        authScreen.classList.remove('hidden');
+        app.classList.add('hidden');
+        const err = document.getElementById('auth-error');
+        err.textContent = 'This account no longer has access. Ask a Super Admin to restore it.';
+        err.classList.remove('hidden');
+        return;
+      }
+
       AppState.user = user;
       AppState.userRole = profile.role;
       AppState.userName = profile.name || user.email;

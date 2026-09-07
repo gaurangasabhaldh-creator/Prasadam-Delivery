@@ -73,6 +73,10 @@ async function loadChecklist() {
           <h2 style="margin:.35rem 0 0">${escapeHtml(state.label || '')}</h2>
           <div class="route-meta"><span>Round <b>${state.roundNumber}</b></span>
             <span><b>${checklist.pending.length}</b> left of ${checklist.total}</span></div>
+          ${checklist.pending.length ? `<div class="bhoga-summary">
+            ${groupByBhoga(checklist.pending).map(g =>
+              `<span class="bhoga-chip ${g.key}"><i class="fa-solid ${g.icon}"></i> ${escapeHtml(BHOGA_TYPES[g.key]?.short || 'Not set')} ${g.list.length}</span>`).join('')}
+          </div>` : ''}
         </div>
         ${checklist.pending.length > 1 ? `
           <button class="btn sm" onclick="window.orderChecklistByDistance()">
@@ -100,7 +104,7 @@ async function loadChecklist() {
            reload — someone else may have just finished the last one.</p>
       </div>` : ''}
 
-    ${pending.map(d => renderChecklistRow(d, areaById.get(d.areaId), false)).join('')}
+    ${renderBhogaSections(pending, areaById)}
 
     ${served.length ? `
       <div class="card-head" style="margin-top:1rem">
@@ -120,6 +124,30 @@ async function loadChecklist() {
   if (search) search.oninput = debounce(() => { _checklistSearch = search.value; loadChecklist(); }, 250);
 }
 
+
+/* Inside the open area, the list is split by offering — Baal, then Raj,
+   then Sandhya, in the order of the day. A sevadar carries the three
+   kinds separately, so grouping them is what makes the list match what is
+   actually in their hands. With only one kind present the heading still
+   shows, because knowing WHICH offering this is matters more than saving
+   a line. */
+function renderBhogaSections(pending, areaById) {
+  if (!pending.length) return '';
+  const groups = groupByBhoga(pending);
+
+  return groups.map(g => `
+    <div class="bhoga-head">
+      <span class="bhoga-title"><i class="fa-solid ${g.icon}"></i> ${escapeHtml(g.label)}</span>
+      <span class="pill ${g.key === BHOGA_UNSET ? 'amber' : 'grey'}">${g.list.length} left</span>
+    </div>
+    ${g.key === BHOGA_UNSET ? `<p class="muted small bhoga-note">
+      No offering set for ${g.list.length === 1 ? 'this devotee' : 'these devotees'} —
+      set it on their profile so the list stays sorted.
+    </p>` : ''}
+    ${g.list.map(d => renderChecklistRow(d, areaById.get(d.areaId), false)).join('')}
+  `).join('');
+}
+
 function renderChecklistRow(d, area, isServed) {
   const nav = navUrlFor(d, area?.name, area?.city);
   const carried = !!d.carriedForwardFrom;
@@ -136,6 +164,7 @@ function renderChecklistRow(d, area, isServed) {
       <div class="stop-body">
         <div class="stop-name">${escapeHtml(d.name)}</div>
         <div class="chip-row">
+          ${BHOGA_TYPES[d.bhoga] ? `<span class="pill blue"><i class="fa-solid ${BHOGA_TYPES[d.bhoga].icon}"></i> ${escapeHtml(BHOGA_TYPES[d.bhoga].short)}</span>` : ''}
           ${carried ? '<span class="pill amber" title="Missed last time — please prioritise">Carried forward</span>' : ''}
           ${(!hasCoords(d) && !d.mapsUrl) ? '<span class="pill red" title="No map link — use the written address">No location</span>' : ''}
         </div>

@@ -32,6 +32,30 @@ Area A → Area B → (Area C + Area D) → Area E → … → Area M ⟲ back t
 - **After the last area it wraps** back to the first and the **round number**
   goes up. Everyone becomes pending again — while their full history is kept.
 
+### The three bhogas
+
+Every devotee is marked with **which offering they receive**:
+
+| | |
+|---|---|
+| ☀️ **Baal Bhoga** | the morning offering |
+| 👑 **Raj Bhoga** | the midday offering |
+| 🌙 **Sandhya Bhoga** | the evening offering |
+
+Inside the open area, the checklist is **split into these three sections**, in
+the order of the day — so the list a sevadar reads matches the offerings they
+are actually carrying. The header shows the count of each before they set out
+(*Baal 4 · Raj 11 · Sandhya 2*), and each card carries its own badge so the
+offering is still visible when searching or reviewing what was served.
+
+One type per devotee: the rotation gives exactly one tick per devotee per visit,
+so a single value keeps "served" unambiguous.
+
+Devotees with **no offering set yet** are not hidden — they appear in a clearly
+labelled group at the bottom of the checklist, and the Devotees tab flags them
+with a **No bhoga set** filter. Nothing is silently defaulted to Raj Bhoga just
+because that is convenient; an unassigned devotee is a fact worth seeing.
+
 ### Why this guarantees nobody is missed
 
 Advancement is driven by **completion, not by a calendar**. An area cannot
@@ -124,14 +148,39 @@ target that fingers actually need.
 | **Admin / Coordinator** | Everything above, plus the directory, the sequence, close-early, reports |
 | **Super Admin** | Plus account roles |
 
-The first account created becomes Super Admin. Enforced in `firestore.rules`,
+The first account created becomes Super Admin. Everyone who signs up after that
+arrives as a **Sevadar** and must be promoted. Enforced in `firestore.rules`,
 not just the UI: a sevadar can record coverage but cannot rename, reassign or
 delete a devotee.
+
+### Managing accounts
+
+The **hamburger** in the top bar (Super Admin only) opens the Accounts drawer:
+promote or demote anyone, and remove access.
+
+**"Remove access" revokes rather than deletes, and that is deliberate.**
+Deleting someone's record would not remove them — the Firebase Auth login still
+exists, they sign in again, and `ensureUserProfile()` recreates the profile as a
+sevadar, quietly handing access back. Revoking marks the record disabled; the
+rules then give that account **rank 0**, which denies everything and survives a
+re-login. Their history stays intact and they can be restored in one tap.
+
+Deleting the **login itself** needs the Firebase Admin SDK and is impossible from
+a browser — do that in Firebase Console → Authentication → Users.
+
+Three guard rails, all enforced in the rules and not only the UI:
+
+- you cannot change your own role
+- you cannot revoke yourself
+- the **last** Super Admin cannot be demoted or revoked
+
+Together these mean an instance can never end up with nobody able to administer
+it.
 
 ## Data model
 
 ```
-devotees/{id}      name, phone, address, mapsUrl, lat/lng, areaId, status,
+devotees/{id}      name, phone, address, mapsUrl, lat/lng, areaId, bhoga, status,
                    servedInRound, lastServedAt, timesServed, carriedForwardFrom
 areas/{id}         name, city, sequencePosition, batchGroup
 settings/rotation  roundNumber, batchKey, areaIds, openedAt   ← the open batch
@@ -170,14 +219,15 @@ js/ui-core.js           auth, roles, tabs, modals, toasts
 js/ui-rotation.js       admin rotation dashboard
 js/ui-checklist.js      the sevadar's checklist
 js/ui-devotees.js       directory + per-devotee history
-js/ui-config.js         area sequence editor, settings, accounts
+js/ui-config.js         area sequence editor, settings
+js/ui-users.js          accounts drawer — roles, revoke, restore
 js/ui-reports.js        coverage KPIs, area health, round history
 firestore.rules         security rules — deploy these
 sw.js                   service worker (bump CACHE on every deploy)
-tests/parse.html        parses every module with the real JS engine
+tests/parse.html        parses all 14 modules with the real JS engine
 tests/rotation.html     52 assertions on the rotation engine
 tests/edge.html         95 assertions on edge cases, link parsing, past bugs
-tests/smoke.html        129 assertions across the whole app
+tests/smoke.html        170 assertions across the whole app
 ```
 
 ## Conventions

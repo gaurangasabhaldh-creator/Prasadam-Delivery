@@ -76,6 +76,10 @@
       </div>
     </div>
     <div class="topbar-right">
+      <button class="icon-btn hidden" id="btn-users" title="Accounts" aria-label="Manage accounts"
+              aria-controls="user-drawer" aria-expanded="false" onclick="window.openUserPanel()">
+        <i class="fa-solid fa-bars"></i>
+      </button>
       <button class="icon-btn hidden" id="btn-install" title="Install app">
         <i class="fa-solid fa-arrow-down-to-bracket"></i><i class="fa-solid fa-mobile-screen-button"></i>
       </button>
@@ -99,6 +103,20 @@
     <section id="tab-config"    class="tabpanel hidden"></section>
     <section id="tab-reports"   class="tabpanel hidden"></section>
   </main>
+</div>
+
+<!-- ══ ACCOUNTS DRAWER (super admin) ══ -->
+<div id="user-drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-label="Accounts">
+  <div class="drawer-scrim" onclick="window.closeUserPanel()"></div>
+  <aside class="drawer-panel">
+    <header class="drawer-head">
+      <h2><i class="fa-solid fa-user-shield"></i> Accounts</h2>
+      <button class="icon-btn" onclick="window.closeUserPanel()" aria-label="Close">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </header>
+    <div class="drawer-body" id="user-drawer-body"></div>
+  </aside>
 </div>
 
 <!-- ══ MODALS ══ -->
@@ -132,6 +150,7 @@
 <script src="./js/ui-checklist.js"></script>
 <script src="./js/ui-devotees.js"></script>
 <script src="./js/ui-config.js"></script>
+<script src="./js/ui-users.js"></script>
 <script src="./js/ui-reports.js"></script>
 <script>
   if ('serviceWorker' in navigator) {

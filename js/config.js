@@ -44,6 +44,57 @@ const ROLE_LABEL = {
   dispatcher: 'Admin / Coordinator'
 };
 
+/* ── BHOGA TYPES ─────────────────────────────────────────────────────
+   Which offering a devotee receives. One type per devotee: the rotation
+   gives exactly one tick per devotee per visit, so a single value keeps
+   "served" unambiguous. Order here is the order of the day, which is also
+   the order the checklist sections appear in.
+
+   `unset` is deliberate rather than defaulted — 600 imported devotees
+   should show up as "not set yet" and be assigned on purpose, not be
+   silently labelled Raj Bhoga because that was a convenient default.     */
+const BHOGA_TYPES = {
+  baal:    { label: 'Baal Bhoga',    short: 'Baal',    icon: 'fa-sun',           order: 1 },
+  raj:     { label: 'Raj Bhoga',     short: 'Raj',     icon: 'fa-crown',         order: 2 },
+  sandhya: { label: 'Sandhya Bhoga', short: 'Sandhya', icon: 'fa-moon',          order: 3 }
+};
+const BHOGA_KEYS = ['baal', 'raj', 'sandhya'];
+const BHOGA_UNSET = 'unset';
+
+function bhogaOf(devotee) {
+  const b = devotee && devotee.bhoga;
+  return BHOGA_TYPES[b] ? b : BHOGA_UNSET;
+}
+
+function bhogaLabel(key) {
+  return BHOGA_TYPES[key] ? BHOGA_TYPES[key].label : 'Bhoga not set';
+}
+
+function bhogaIcon(key) {
+  return BHOGA_TYPES[key] ? BHOGA_TYPES[key].icon : 'fa-circle-question';
+}
+
+// Splits a list into the three offerings plus anything unassigned, in the
+// order of the day. Empty groups are dropped so the checklist only shows
+// sections that actually have someone in them.
+function groupByBhoga(devotees) {
+  const buckets = new Map();
+  BHOGA_KEYS.forEach(k => buckets.set(k, []));
+  buckets.set(BHOGA_UNSET, []);
+
+  (devotees || []).forEach(d => buckets.get(bhogaOf(d)).push(d));
+
+  return [...buckets.entries()]
+    .filter(([, list]) => list.length)
+    .map(([key, list]) => ({
+      key, list,
+      label: bhogaLabel(key),
+      icon: bhogaIcon(key),
+      order: BHOGA_TYPES[key] ? BHOGA_TYPES[key].order : 99
+    }))
+    .sort((a, b) => a.order - b.order);
+}
+
 // ── ROTATION ──────────────────────────────────────────
 const BATCH_STATUS = {
   upcoming: { label: 'Upcoming', pill: 'grey',  icon: 'fa-hourglass' },

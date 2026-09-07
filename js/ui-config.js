@@ -95,21 +95,13 @@ async function loadConfig() {
       <div class="modal-foot"><button class="btn primary" id="cf-save"><i class="fa-solid fa-check"></i> Save settings</button></div>
     </div>
 
-    <!-- ── ACCOUNTS ── -->
     ${hasRole('superAdmin') ? `
     <div class="card">
       <div class="card-head"><h2><i class="fa-solid fa-user-shield"></i> Accounts</h2></div>
-      <p class="muted small">Sevadars see only the open checklist. Admins can manage the directory and the sequence.</p>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Email</th><th>Role</th></tr></thead>
-        <tbody>${users.map(u => `
-          <tr>
-            <td>${escapeHtml(u.email || '')}${u.id === AppState.user.uid ? ' <span class="pill grey">you</span>' : ''}</td>
-            <td><select onchange="window.changeUserRole('${u.id}', this.value)" ${u.id === AppState.user.uid ? 'disabled' : ''}>
-              ${ROLES.map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
-            </select></td>
-          </tr>`).join('')}</tbody>
-      </table></div>
+      <p class="muted small">Add, promote or remove the people who can use this app.</p>
+      <button class="btn primary" onclick="window.openUserPanel()">
+        <i class="fa-solid fa-bars"></i> Manage accounts
+      </button>
     </div>` : ''}`;
 
   wireSequenceDrag();
@@ -307,11 +299,6 @@ window.openMergeAreas = function () {
       await loadConfig();
     } finally { setBusy(false); }
   };
-};
-
-window.changeUserRole = async function (uid, role) {
-  await DB.setUserRole(uid, role);
-  showToast(`Role set to ${ROLE_LABEL[role]}`, 'success');
 };
 
 window.loadConfig = loadConfig;

@@ -289,6 +289,37 @@ async function main() {
         mapsLinkHasCoords(REAL) === false);
 
   log('');
+  log('====== 16: bhoga grouping ======');
+  const bd = (id, b) => ({ id, name: 'D' + id, bhoga: b });
+
+  check('three offerings are defined', BHOGA_KEYS.length === 3);
+  check('they are Baal, Raj and Sandhya',
+        BHOGA_KEYS.map(k => BHOGA_TYPES[k].label).join(', ') === 'Baal Bhoga, Raj Bhoga, Sandhya Bhoga',
+        BHOGA_KEYS.map(k => BHOGA_TYPES[k].label).join(', '));
+
+  const mixed = [bd('1','raj'), bd('2','baal'), bd('3','sandhya'), bd('4','baal'), bd('5', null)];
+  const groups = groupByBhoga(mixed);
+  check('groups follow the order of the day (Baal, Raj, Sandhya)',
+        groups.slice(0,3).map(g => g.key).join(',') === 'baal,raj,sandhya',
+        groups.map(g => g.key).join(','));
+  check('devotees with no offering land in their own group last',
+        groups[groups.length - 1].key === BHOGA_UNSET);
+  check('every devotee lands in exactly one group',
+        groups.reduce((n, g) => n + g.list.length, 0) === mixed.length);
+  check('Baal group holds both its devotees', groups[0].list.length === 2);
+
+  check('empty groups are dropped rather than shown blank',
+        groupByBhoga([bd('1','raj')]).length === 1);
+  check('an empty list yields no groups', groupByBhoga([]).length === 0);
+  check('a null list is safe', groupByBhoga(null).length === 0);
+  check('an unknown bhoga value falls back to unset',
+        groupByBhoga([bd('1','nonsense')])[0].key === BHOGA_UNSET);
+  check('bhogaOf normalises a missing value', bhogaOf({}) === BHOGA_UNSET);
+  check('bhogaOf reads a valid value', bhogaOf({ bhoga: 'raj' }) === 'raj');
+  check('bhogaLabel names the unset group readably',
+        bhogaLabel(BHOGA_UNSET).indexOf('not set') > -1, bhogaLabel(BHOGA_UNSET));
+
+  log('');
   log('====== 16: role ranking ======');
   AppState.userRole = 'sevadar';
   check('sevadar is not admin', hasRole('sevadar') && !hasRole('admin'));

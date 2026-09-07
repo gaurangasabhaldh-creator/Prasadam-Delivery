@@ -97,6 +97,12 @@ them (matched on phone, falling back to a close name match).
 imported without one are flagged in the preview, and the app will keep warning
 you until they are assigned, because a devotee with no area is never covered.
 
+**Set each devotee's bhoga** — Baal, Raj or Sandhya. The checklist is grouped by
+this, so a sevadar sees the offerings separately. If your spreadsheet has a
+column for it the import picks it up (it accepts "Raj", "raj bhoga", "RAJ
+BHOGA"); otherwise use the **No bhoga set** filter on the Devotees tab to assign
+them. Devotees without one still appear on the checklist, in their own group.
+
 **Setting a location:** open a devotee and paste a **Google Maps link**
 (in Maps: find the place → Share → Copy link). The sevadar's *Navigate* button
 then takes them straight there.

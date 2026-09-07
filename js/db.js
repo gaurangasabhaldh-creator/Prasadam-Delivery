@@ -98,9 +98,59 @@ const DB = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
+  /* ── ACCOUNT MANAGEMENT (super admin only) ─────────
+     Note on "removing" someone: deleting their users/{uid} document does
+     NOT remove them. The Firebase Auth login still exists, they can sign
+     in again, and ensureUserProfile() would simply recreate the profile
+     as a sevadar — quietly handing back access.
+
+     So removal here means REVOKING: the profile stays, marked disabled,
+     and the security rules give a disabled account rank 0, which denies
+     everything. That survives a re-login, which a delete would not.
+
+     Deleting the Auth login itself needs the Admin SDK (server-side) and
+     is impossible from a browser — it is done in the Firebase Console.   */
+
   async setUserRole(uid, role) {
+    if (!ROLES.includes(role)) throw new Error('Unknown role');
+    if (uid === (AppState.user && AppState.user.uid)) {
+      throw new Error('You cannot change your own role');
+    }
+    const users = await this.getUsers();
+    const target = users.find(u => u.id === uid);
+    if (!target) throw new Error('Account not found');
+
+    // Never let the last owner be demoted — that locks everybody out of
+    // account management permanently, with no way back from inside the app.
+    if (target.role === 'superAdmin' && role !== 'superAdmin') {
+      const owners = users.filter(u => u.role === 'superAdmin' && !u.disabled);
+      if (owners.length <= 1) throw new Error('This is the only Super Admin — promote someone else first');
+    }
+
     await fdb.collection('users').doc(uid).update(this.stamp({ role }));
-    await this.audit('user.role', 'user', uid, { role });
+    await this.audit('user.role', 'user', uid, { role, from: target.role, email: target.email || '' });
+  },
+
+  async setUserAccess(uid, disabled) {
+    if (uid === (AppState.user && AppState.user.uid)) {
+      throw new Error('You cannot revoke your own access');
+    }
+    const users = await this.getUsers();
+    const target = users.find(u => u.id === uid);
+    if (!target) throw new Error('Account not found');
+
+    if (disabled && target.role === 'superAdmin') {
+      const owners = users.filter(u => u.role === 'superAdmin' && !u.disabled);
+      if (owners.length <= 1) throw new Error('This is the only Super Admin — promote someone else first');
+    }
+
+    await fdb.collection('users').doc(uid).update(this.stamp({
+      disabled: !!disabled,
+      disabledAt: disabled ? new Date().toISOString() : null,
+      disabledBy: disabled ? (AppState.user ? AppState.user.uid : 'system') : null
+    }));
+    await this.audit(disabled ? 'user.revoke' : 'user.restore', 'user', uid,
+                     { email: target.email || '', role: target.role });
   },
 
   // ── SETTINGS ────────────────────────────────────────
@@ -219,6 +269,8 @@ const DB = {
       // The Google Maps link the coordinator pasted. Kept verbatim even when
       // coordinates were extracted from it, so the original is never lost.
       mapsUrl: (devotee.mapsUrl || '').trim(),
+      // Which offering this devotee receives; '' means not assigned yet.
+      bhoga: BHOGA_TYPES[devotee.bhoga] ? devotee.bhoga : '',
       areaId: devotee.areaId || null,
       status: devotee.status || 'active',
       notes: devotee.notes || ''

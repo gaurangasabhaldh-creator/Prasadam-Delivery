@@ -42,7 +42,7 @@ window.exportDevotees = async function () {
     const [devotees, state] = await Promise.all([DB.getDevotees(), Rotation.getState()]);
     const areaById = new Map(AppState.areas.map(a => [a.id, a]));
 
-    const rows = [['Name', 'Phone', 'Address', 'Area', 'Batch', 'Status',
+    const rows = [['Name', 'Phone', 'Address', 'Area', 'Batch', 'Bhoga', 'Status',
                    'Last received', 'Days since', 'Times served', 'In rotation',
                    'Google Maps link', 'Latitude', 'Longitude', 'Notes']];
 
@@ -52,6 +52,7 @@ window.exportDevotees = async function () {
       rows.push([
         d.name || '', d.phone || '', d.addressText || '',
         area?.name || '', area?.batchGroup || '',
+        BHOGA_TYPES[d.bhoga] ? BHOGA_TYPES[d.bhoga].label : '',
         d.status === 'paused' ? 'Paused' : 'Active',
         d.lastServedAt ? fmtDateShort(d.lastServedAt) : 'Never',
         since === null ? '' : since,
@@ -64,7 +65,7 @@ window.exportDevotees = async function () {
     });
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, sheetFromRows(rows, [22, 14, 32, 18, 10, 10, 14, 11, 12, 34, 40, 12, 12, 26]), 'Devotees');
+    XLSX.utils.book_append_sheet(wb, sheetFromRows(rows, [22, 14, 32, 18, 10, 15, 10, 14, 11, 12, 34, 40, 12, 12, 26]), 'Devotees');
     downloadWorkbook(wb, `Devotees_${todayStr()}.xlsx`);
     showToast(`Exported ${devotees.length} devotees`, 'success');
   } catch (e) {
@@ -123,6 +124,7 @@ const IMPORT_FIELDS = [
   { key: 'phone',       label: 'Phone',   required: false, hints: ['phone', 'mobile', 'contact', 'number', 'no.'] },
   { key: 'addressText', label: 'Address', required: false, hints: ['address', 'house', 'street', 'location', 'pata'] },
   { key: 'area',        label: 'Area',    required: false, hints: ['area', 'zone', 'locality', 'sector', 'colony'] },
+  { key: 'bhoga',       label: 'Bhoga',     required: false, hints: ['bhoga', 'prasadam type', 'type', 'offering'] },
   { key: 'mapsUrl',     label: 'Maps link', required: false, hints: ['maps link', 'google maps', 'map link', 'location link', 'link', 'url'] },
   { key: 'lat',         label: 'Latitude',  required: false, hints: ['lat', 'latitude'] },
   { key: 'lng',         label: 'Longitude', required: false, hints: ['lng', 'lon', 'long', 'longitude'] },
@@ -242,6 +244,10 @@ async function buildImportPreview() {
 
     // A pasted Maps link often carries coordinates; take them when the sheet
     // has no explicit lat/lng columns of its own.
+    // Accept "Raj", "raj bhoga", "RAJ BHOGA" — whatever the sheet holds.
+    const bhogaRaw = cell(row, map.bhoga).toLowerCase().replace(/bhoga/g, '').trim();
+    const bhoga = BHOGA_KEYS.find(k => k === bhogaRaw || BHOGA_TYPES[k].short.toLowerCase() === bhogaRaw) || '';
+
     const mapsUrl = cell(row, map.mapsUrl);
     if (!hasPin && mapsUrl) {
       const parsed = parseMapsLink(mapsUrl);
@@ -256,6 +262,7 @@ async function buildImportPreview() {
         name, phone,
         addressText: cell(row, map.addressText),
         areaId,
+        bhoga: bhoga || match?.bhoga || '',
         mapsUrl: mapsUrl || match?.mapsUrl || '',
         lat: hasPin ? lat : (match?.lat ?? null),
         lng: hasPin ? lng : (match?.lng ?? null),
@@ -285,11 +292,12 @@ async function buildImportPreview() {
       They will be imported but <b>never covered</b> until you assign them one.</div>` : ''}
 
     <div class="table-wrap" style="max-height:280px; overflow-y:auto">
-      <table><thead><tr><th>Row</th><th>Name</th><th>Area</th><th>Location</th><th>Action</th></tr></thead>
+      <table><thead><tr><th>Row</th><th>Name</th><th>Area</th><th>Bhoga</th><th>Location</th><th>Action</th></tr></thead>
         <tbody>${parsed.slice(0, 100).map(p => `
           <tr><td class="muted small">${p.rowNumber}</td>
             <td>${escapeHtml(p.data.name)}</td>
             <td>${escapeHtml(p.areaName || '—')}</td>
+            <td>${p.data.bhoga ? `<span class="pill blue">${escapeHtml(BHOGA_TYPES[p.data.bhoga].short)}</span>` : '<span class="muted small">—</span>'}</td>
             <td>${p.data.lat ? '<span class="pill green">Exact</span>'
                   : p.data.mapsUrl ? '<span class="pill blue">Link</span>'
                   : '<span class="muted small">—</span>'}</td>

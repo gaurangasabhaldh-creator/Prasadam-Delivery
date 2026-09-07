@@ -2,7 +2,7 @@
    BUMP THIS VERSION STRING on every deploy that changes HTML/JS/CSS.
    Without a bump, browsers keep serving the old cached files.
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-const CACHE = 'sevaroute-v9';
+const CACHE = 'sevaroute-v11';
 
 const SHELL = [
   './index.html',
@@ -19,6 +19,7 @@ const SHELL = [
   './js/ui-checklist.js',
   './js/ui-devotees.js',
   './js/ui-config.js',
+  './js/ui-users.js',
   './js/ui-reports.js',
   './js/xlsx-js-style.bundle.js',
   './icons/icon.svg',

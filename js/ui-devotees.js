@@ -20,6 +20,7 @@ async function loadDevotees() {
   const noPin = devotees.filter(d => !hasCoords(d));
   const paused = devotees.filter(d => d.status === 'paused');
   const carried = active.filter(d => d.carriedForwardFrom);
+  const noBhoga = active.filter(d => !BHOGA_TYPES[d.bhoga]);
 
   const filtered = devotees.filter(d => {
     if (_devFilter === 'overdue') { const n = daysSince(d.lastServedAt); if (!(isActiveDevotee(d) && n !== null && n > overdueDays)) return false; }
@@ -27,6 +28,8 @@ async function loadDevotees() {
     if (_devFilter === 'paused'  && d.status !== 'paused') return false;
     if (_devFilter === 'noPin'   && hasCoords(d)) return false;
     if (_devFilter === 'carried' && !d.carriedForwardFrom) return false;
+    if (_devFilter === 'noBhoga' && BHOGA_TYPES[d.bhoga]) return false;
+    if (BHOGA_TYPES[_devFilter] && d.bhoga !== _devFilter) return false;
     if (_devSearch) {
       const hay = `${d.name} ${d.phone || ''} ${d.addressText || ''} ${areaById.get(d.areaId)?.name || ''}`.toLowerCase();
       if (!hay.includes(_devSearch.toLowerCase())) return false;
@@ -40,9 +43,15 @@ async function loadDevotees() {
       <div class="stat ${neverServed.length ? 'warn' : 'good'}"><div class="stat-value">${neverServed.length}</div><div class="stat-label">Never served</div></div>
       <div class="stat ${overdue.length ? 'bad' : 'good'}"><div class="stat-value">${overdue.length}</div><div class="stat-label">Over ${overdueDays}d</div></div>
       <div class="stat ${carried.length ? 'warn' : ''}"><div class="stat-value">${carried.length}</div><div class="stat-label">Carried forward</div></div>
-      <div class="stat ${noPin.length ? 'warn' : ''}"><div class="stat-value">${noPin.length}</div><div class="stat-label">No pin</div></div>
+      <div class="stat ${noBhoga.length ? 'warn' : 'good'}"><div class="stat-value">${noBhoga.length}</div><div class="stat-label">No bhoga</div></div>
       <div class="stat"><div class="stat-value">${paused.length}</div><div class="stat-label">Paused</div></div>
     </div>
+
+    ${noBhoga.length ? `<div class="alert warning">
+      <b>${noBhoga.length} devotee${noBhoga.length === 1 ? ' has' : 's have'} no bhoga set.</b>
+      They are still fully in the rotation, but appear in an unlabelled group at the bottom of the
+      checklist. Use the <b>No bhoga set</b> filter to assign them.
+    </div>` : ''}
 
     ${noPin.length ? `<div class="alert info">
       <b>${noPin.length} devotee${noPin.length === 1 ? ' has' : 's have'} no map pin.</b>
@@ -70,6 +79,8 @@ async function loadDevotees() {
           <option value="overdue">Overdue (${overdue.length})</option>
           <option value="never">Never served (${neverServed.length})</option>
           <option value="carried">Carried forward (${carried.length})</option>
+          <option value="noBhoga">No bhoga set (${noBhoga.length})</option>
+          ${BHOGA_KEYS.map(k => `<option value="${k}">${BHOGA_TYPES[k].label} (${active.filter(d => d.bhoga === k).length})</option>`).join('')}
           <option value="noPin">No map pin (${noPin.length})</option>
           <option value="paused">Paused (${paused.length})</option>
         </select>
@@ -107,6 +118,9 @@ function renderDevoteeRow(d, areaById, state, overdueDays) {
         ${d.status === 'paused' ? '<span class="pill grey">Paused</span>' : ''}
       </div>
       <div class="stop-sub">${escapeHtml(d.phone || '—')}</div>
+      ${BHOGA_TYPES[d.bhoga]
+        ? `<span class="pill blue"><i class="fa-solid ${BHOGA_TYPES[d.bhoga].icon}"></i> ${escapeHtml(BHOGA_TYPES[d.bhoga].short)}</span>`
+        : '<span class="pill amber">No bhoga set</span>'}
     </td>
     <td>${escapeHtml(area ? area.name : '—')}
       ${(hasCoords(d) || d.mapsUrl) ? '' : '<div class="stop-sub muted">no location</div>'}</td>
@@ -145,6 +159,19 @@ window.editDevotee = async function (id) {
     <div class="field"><label>Name *</label><input id="dv-name" value="${escapeHtml(d.name || '')}"></div>
     <div class="field"><label>Phone</label><input id="dv-phone" inputmode="numeric" value="${escapeHtml(d.phone || '')}"></div>
     <div class="field"><label>Address</label><textarea id="dv-address" placeholder="House / street / landmark">${escapeHtml(d.addressText || '')}</textarea></div>
+
+    <div class="field">
+      <label>Which bhoga do they receive? *</label>
+      <div class="bhoga-picker" id="dv-bhoga-picker">
+        ${BHOGA_KEYS.map(k => `
+          <button type="button" class="bhoga-opt ${d.bhoga === k ? 'on' : ''}" data-bhoga="${k}">
+            <i class="fa-solid ${BHOGA_TYPES[k].icon}"></i>
+            <span>${BHOGA_TYPES[k].label}</span>
+          </button>`).join('')}
+      </div>
+      <p class="muted small">The checklist is grouped by this, so a sevadar can see at a glance
+         which offering each devotee is waiting for.</p>
+    </div>
 
     <div class="grid-2">
       <div class="field"><label>Area</label><select id="dv-area">${areaOpts}</select></div>
@@ -185,6 +212,18 @@ window.editDevotee = async function (id) {
       <button class="btn" onclick="closeModal('devotee-modal')">Cancel</button>
       <button class="btn primary" id="dv-save"><i class="fa-solid fa-check"></i> Save</button>
     </div>`);
+
+  // Tap-to-choose rather than a dropdown: three options is few enough that
+  // showing them all is faster than opening a select, especially one-handed.
+  let bhoga = BHOGA_TYPES[d.bhoga] ? d.bhoga : '';
+  document.querySelectorAll('#dv-bhoga-picker .bhoga-opt').forEach(btn => {
+    btn.onclick = () => {
+      // Tapping the chosen one again clears it, so a mistake is undoable.
+      bhoga = (bhoga === btn.dataset.bhoga) ? '' : btn.dataset.bhoga;
+      document.querySelectorAll('#dv-bhoga-picker .bhoga-opt')
+        .forEach(b => b.classList.toggle('on', b.dataset.bhoga === bhoga));
+    };
+  });
 
   let coords = hasCoords(d) ? { lat: d.lat, lng: d.lng } : null;
   const coordsEl = document.getElementById('dv-coords');
@@ -256,6 +295,7 @@ window.editDevotee = async function (id) {
         phone: document.getElementById('dv-phone').value,
         addressText: document.getElementById('dv-address').value,
         areaId: document.getElementById('dv-area').value || null,
+        bhoga,
         mapsUrl: document.getElementById('dv-maps').value,
         lat: coords?.lat ?? null, lng: coords?.lng ?? null,
         geocodeStatus: coords ? 'ok' : 'pending',
